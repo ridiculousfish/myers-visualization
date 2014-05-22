@@ -13,6 +13,7 @@
 
 <script type="module">
 
+
 var my_myers = function(down_string, top_string, ident) {
     var self = this
     
@@ -59,17 +60,29 @@ var my_myers = function(down_string, top_string, ident) {
         return circle
     }
 
+    self.normal_line_style = {stroke: "black", strokeWidth: 1.05}
+    self.current_line_style = {stroke: "red", strokeWidth: 2}
+
     self.connect_dots = function(row1, col1, row2, col2, solid, animate) {
         var x1 = self.dot_x(row1, col1), y1 = self.dot_y(row1, col1)
         var x2 = self.dot_x(row2, col2), y2 = self.dot_y(row2, col2)
         var line = svg.line(x1, y1, animate ? x1 : x2, animate ? y1 : y2)
-        line.attr({stroke: "black", strokeWidth: 1.05})
+        line.attr(self.normal_line_style)
         if (! solid) {
             line.attr({strokeDasharray:"1,2"})
         }
         if (animate) {
             line.animate({x2: x2, y2: y2}, 250)
         }
+        return line
+    }
+
+    self.highlight_line = function(row1, col1, row2, col2) {
+        var x1 = self.dot_x(row1, col1), y1 = self.dot_y(row1, col1)
+        var x2 = self.dot_x(row2, col2), y2 = self.dot_y(row2, col2)
+        var line = svg.line(x1, y1, x2, y2)
+        line.attr({stroke: "blue", strokeWidth: 2.0, opacity: .25})
+
         return line
     }
 
@@ -121,6 +134,34 @@ var my_myers = function(down_string, top_string, ident) {
     return self
 }
 
+
+function visualization_result(line, diagonal, myers) {
+    var self = this
+    self.line = line
+
+    if (isNaN(diagonal)) {
+        self.diagonal = []
+    } else {
+        // Diagonals are of the form x - y
+        // Compute start and end points for it
+        var startX = 0, startY = 0
+        if (diagonal < 0) {
+            startY = -diagonal
+        } else {
+            startX = diagonal
+        }
+    
+        // Hacktastic
+        var endX = startX, endY = startY
+        while (endX + 1 < myers.cols && endY + 1 < myers.rows) {
+            endX++;
+            endY++;
+        }
+        self.diagonal = [startX, startY, endX, endY]
+    }
+    return self
+}
+
 // Single directional myers diff algorithm
 function* step_myers_unidir_coroutine(myers) {
     var endpoints = new Array()
@@ -151,12 +192,12 @@ function* step_myers_unidir_coroutine(myers) {
             }
             var y = x - diagonal
 
-            yield [x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y]
+            yield new visualization_result([x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y], diagonal, myers)
 
             while (x < top_len && y < down_len && myers.top_string[x] == myers.down_string[y]) {
                 x++
                 y++
-                yield [x-1, y-1, x, y]
+                yield new visualization_result([x-1, y-1, x, y], NaN, myers)
             }
 
             endpoints[diagonal] = x
@@ -172,6 +213,9 @@ var myers = my_myers("SMOLE", "MILESSS", "#myers")
 
 var begin_stepping = function() {
     var gener = step_myers_unidir_coroutine(myers)
+    var highlight_lines = []
+    var normal_lines = []
+    var last_normal_line = false
     var timer = setInterval(function() {
         for (;;) {
             var ret = gener.next()
@@ -179,18 +223,35 @@ var begin_stepping = function() {
                 clearInterval(timer)
                 break
             } else {
-                var line = ret.value
-                console.log(line)
+                var vis_result = ret.value
+
+                if (last_normal_line !== false) {
+                    last_normal_line.attr(myers.normal_line_style)
+                }
+
+                
+                var diagonal = vis_result.diagonal
+                if (diagonal.length == 4) {
+                    for (var i=0; i < highlight_lines.length; i++) {
+                        highlight_lines[i].remove()
+                    }
+                    var line = myers.highlight_line(diagonal[1], diagonal[0], diagonal[3], diagonal[2])
+                    highlight_lines.push(line)
+                }
+
+                var line = vis_result.line
                 if (line[0] >= 0 && line[0] < myers.cols &&
                     line[1] >= 0 && line[1] < myers.rows &&
                     line[2] >= 0 && line[2] < myers.cols &&
                     line[3] >= 0 && line[3] < myers.rows) {
-                    myers.connect_dots(line[1], line[0], line[3], line[2], true, true)
-                    break
+                    last_normal_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, true)
+                    last_normal_line.attr(myers.current_line_style)
+                    normal_lines.push(last_normal_line)
                 }
+                break
             }
         }
-    }, 500)
+    }, 750)
 }
 
 begin_stepping()
