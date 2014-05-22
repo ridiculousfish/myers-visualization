@@ -1,0 +1,210 @@
+<html>
+<body>
+
+
+<script src="snap.svg-min.js"></script>
+
+<svg width="410" height="410" id="myers">
+</svg>
+
+<script type="text/javascript">
+
+var my_myers = function(down_string, top_string, ident) {
+    var self = this
+    
+    rows = down_string.length + 1
+    cols = top_string.length + 1
+
+    var svg_width = 410
+    var svg_height = 410
+
+    var svg = Snap(ident)
+    self.svg = svg
+    self.rows = rows
+    self.cols = cols
+    self.top_string = top_string
+    self.down_string = down_string
+    self.dot_radius = 4
+    self.width = svg_width
+    self.height = svg_height
+    self.label_xoffset = 15
+    self.label_yoffset = 15 
+    self.grid_offset = 5
+    self.grid_width = self.width - 2 * self.grid_offset
+    self.grid_height = self.height - 2 * self.grid_offset
+    self.dot_xspacing = self.grid_width / self.cols
+    self.dot_yspacing = self.grid_height / self.rows
+    self.dot_xoffset = self.grid_offset + self.dot_xspacing / 2
+    self.dot_yoffset = self.grid_offset + self.dot_yspacing / 2
+ 
+    self.dot_x = function(row, col) {
+        return self.dot_xoffset + col * self.dot_xspacing
+    }
+
+    self.dot_y = function(row, col) {
+        return self.dot_yoffset + row * self.dot_yspacing
+    }
+
+    self.make_dot = function(row, col) {
+        var circle = svg.circle(self.dot_x(row, col), self.dot_y(row, col), self.dot_radius)
+        circle.attr({
+            fill: "white",
+            stroke: "black",
+            strokeWidth: 1,
+            })
+        return circle
+    }
+
+    self.connect_dots = function(row1, col1, row2, col2, dotted) {
+        var line = svg.line(self.dot_x(row1, col1), self.dot_y(row1, col1), self.dot_x(row2, col2), self.dot_y(row2, col2))
+        line.attr({stroke: "black", strokeWidth: 1.05})
+        if (dotted) {
+            line.attr({strokeDasharray:"1,2"})
+        }
+        return line
+    }
+
+    self.make_label = function(is_vertical, row, col, txt) {
+        var x = is_vertical ? self.label_xoffset : self.dot_xoffset + self.dot_xspacing / 2
+        var y = is_vertical ? self.dot_yoffset + self.dot_yspacing / 2 : self.label_yoffset
+        x += col * self.dot_xspacing
+        y += row * self.dot_yspacing
+        text_obj = self.svg.text(x, y, txt)
+        text_obj.attr({textAnchor: is_vertical ? "middle" : "end"})
+        return text_obj
+    }
+
+    // Make the labels
+    for (var x=0; x < top_string.length; x++) {
+        make_label(false, 0, x, top_string[x])
+    }
+    for (var y=0; y < down_string.length; y++) {
+        make_label(true, y, 0, down_string[y])
+    }
+
+    // Make the grid
+    self.grid = new Array(rows)
+    for (var row=0; row < rows; row++) {
+        self.grid[row] = new Array(cols)
+        for (var col = 0; col < cols; col++) {
+            self.grid[row][col] = self.make_dot(row, col)
+       }
+    }
+
+    // Add paths
+    for (var y=0; y < self.rows; y++) {
+        for (var x=0; x < self.cols; x++) {
+            if (y + 1 < self.rows) {
+                // down path
+                connect_dots(y, x, y+1, x, true)
+            }
+            if (x + 1 < self.cols) {
+                // right path
+                connect_dots(y, x, y, x+1, true)
+            }
+
+            if (y < down_string.length && x < top_string.length && down_string[y] == top_string[x]) {
+                connect_dots(y, x, y + 1, x+1, true)
+            }
+        }
+    }
+
+    return self
+}
+
+// Single directional myers diff algorithm
+function step_myers_unidir(myers, st) {
+    if (! st.initialized) {
+        st.initialized = true
+        st.top = myers.top_string
+        st.down = myers.down_string
+        st.endpoints_by_diagonal = new Array()
+        st.endpoints_by_diagonal[1] = 0
+        st.step = -1
+        st.diagonal =  0
+
+        st.snaking = false
+        st.x = 0
+        st.y = 0
+    }
+
+    if (st.snaking) {
+        if (st.x < st.top.length && st.y < st.down.length && st.top[st.x] == st.down[st.y]) {
+            st.x += 1
+            st.y += 1
+            st.endpoints_by_diagonal[st.diagonal] = st.x
+            return [st.x-1, st.y-1, st.x, st.y]
+        }
+        // Done snaking from previous diagonal. Go to next diagonal.
+        st.snaking = false
+    }
+
+    // Go to the next diagonal. If we're done, go to the next step
+    st.diagonal += 2
+    if (st.diagonal > st.step) {
+        st.step += 1
+        st.diagonal = -st.step
+    }
+
+    if (st.step > Math.max(st.top.length, st.down.length)) {
+        // All done
+        return false
+    }
+
+    // Handle this diagonal
+    var go_down
+    if (st.diagonal == -st.step) {
+        // No left neighbor, must go down
+        go_down = true
+    } else if (st.diagonal == st.step) {
+        // No top neighbor, must go right
+        go_down = false
+    } else {
+        // Both left and top neighbor. Go down if our top neighbor (diagonal-1) has made more progress than our left neighbor (diagonal + 1)
+        go_down = (st.endpoints_by_diagonal[st.diagonal - 1] < st.endpoints_by_diagonal[st.diagonal + 1])
+    }
+
+    if (go_down) {
+        st.x = st.endpoints_by_diagonal[st.diagonal + 1]
+    } else {
+        st.x = st.endpoints_by_diagonal[st.diagonal - 1] + 1
+    }
+    st.y = st.x - st.diagonal
+    st.endpoints_by_diagonal[st.diagonal] = st.x
+    st.snaking = true
+    return [st.x - (go_down ? 0 : 1), st.y - (go_down ? 1 : 0), st.x, st.y]
+}
+
+var myers = my_myers("SMILE", "MILES", "#myers")
+
+var begin_stepping = function() {
+    st = {initialized: false, x: 0, y: 0}
+    var timer = setInterval(function() {
+        var was_inited = st.initialized
+        var x = st.x, y = st.y
+        var line = step_myers_unidir(myers, st)
+        var all_done = false
+        if (line === false) {
+            all_done = true
+        } else if (line.length == 4) {
+            // line is x0, y0, x1, y1
+            if (line[1] >= 0 && line[3] >= 0) {
+                myers.connect_dots(line[1], line[0], line[3], line[2])
+            }
+            if (line[2] == myers.top_string.length && line[3] == myers.down_string.length) {
+                all_done = true
+            }
+        }
+        if (all_done) {
+             clearInterval(timer)
+        }
+    }, 1000)
+}
+
+begin_stepping()
+
+</script>
+
+</body>
+</html>
+
