@@ -60,7 +60,7 @@ var my_myers = function(down_string, top_string, ident) {
         return circle
     }
 
-    self.normal_line_style = {stroke: "black", strokeWidth: 1.05}
+    self.normal_line_style = {stroke: "black", strokeWidth: 1.5}
     self.current_line_style = {stroke: "red", strokeWidth: 2}
 
     self.connect_dots = function(row1, col1, row2, col2, solid, animate) {
@@ -77,13 +77,28 @@ var my_myers = function(down_string, top_string, ident) {
         return line
     }
 
-    self.highlight_line = function(row1, col1, row2, col2) {
+    self.highlight_line = function(row1, col1, row2, col2, strong) {
         var x1 = self.dot_x(row1, col1), y1 = self.dot_y(row1, col1)
         var x2 = self.dot_x(row2, col2), y2 = self.dot_y(row2, col2)
         var line = svg.line(x1, y1, x2, y2)
-        line.attr({stroke: "blue", strokeWidth: 2.0, opacity: .25})
-
+        if (strong) {
+            line.attr({stroke: "cyan", strokeWidth: 2.0, opacity: .8})
+        } else {
+            line.attr({stroke: "blue", strokeWidth: 2.0, opacity: .15})
+        }
         return line
+    }
+
+    self.highlight_point = function(row, col) {
+        var x = self.dot_x(row, col)
+        var xy = self.dot_y(row, col)
+        var circle = svg.circle(self.dot_x(row, col), self.dot_y(row, col), self.dot_radius)
+        circle.attr({
+            fill: "white",
+            stroke: "cyan",
+            strokeWidth: 2,
+            })
+        return circle
     }
 
     self.make_label = function(is_vertical, row, col, txt) {
@@ -95,6 +110,18 @@ var my_myers = function(down_string, top_string, ident) {
         text_obj.attr({textAnchor: is_vertical ? "middle" : "end"})
         return text_obj
     }
+
+    // Reports if a line [x0, y0, x1, y1] is at all contained within our grid
+    self.line_intersects_grid = function(line) {
+        var result = false
+        if (line.length == 4) {
+            var xBad = (line[0] < 0 && line[2] < 0) || (line[0] >= self.cols)
+            var yBad = (line[1] < 0 && line[3] < 0) || (line[1] >= self.rows)
+            result = ! xBad && ! yBad
+        }
+        return result
+    }
+
 
     // Make the labels
     for (var x=0; x < top_string.length; x++) {
@@ -135,9 +162,11 @@ var my_myers = function(down_string, top_string, ident) {
 }
 
 
-function visualization_result(line, diagonal, myers) {
+function visualization_result(line, diagonal, candidate_lines, reset_highlight, myers) {
     var self = this
     self.line = line
+    self.candidate_lines = candidate_lines
+    self.reset_highlight = reset_highlight
 
     if (isNaN(diagonal)) {
         self.diagonal = []
@@ -173,13 +202,35 @@ function* step_myers_unidir_coroutine(myers) {
     var done = false
     for (var step=0; step <= MAX && ! done; step++) {
         for (var diagonal = -step; diagonal <= step; diagonal+=2) {
+
+            // Helper function
+            function get_y(x) {
+                return x - diagonal
+            }
+
+            function get_line(x, down) {
+                // if down is true, we are starting from the diagonal above us, which is larger
+                // if down is false, we are starting from the diagonal to our left, which is smaller
+                var other_diagonal = diagonal + (down ? 1 : -1)
+                var start_x = x - (down ? 0 : 1)
+                var start_y = start_x - other_diagonal
+                return [start_x, start_y, start_x + (down ? 0 : 1), start_y + (down ? 1 : 0)]
+            }
+
             var go_down
+            var candidate_lines = []
             if (diagonal == -step) {
+                var top_x = endpoints[diagonal+1]
                 go_down = true
+                candidate_lines.push(get_line(top_x, go_down))
             } else if (diagonal == step) {
+                var left_x = endpoints[diagonal-1]
                 go_down = false
+                candidate_lines.push(get_line(left_x + 1, go_down))
             } else {
-                go_down = endpoints[diagonal-1] < endpoints[diagonal + 1]
+                var left_x = endpoints[diagonal-1], top_x = endpoints[diagonal+1]
+                go_down = left_x < top_x
+                candidate_lines.push(get_line(top_x, true), get_line(left_x + 1, false))
             }
 
             var x
@@ -192,12 +243,12 @@ function* step_myers_unidir_coroutine(myers) {
             }
             var y = x - diagonal
 
-            yield new visualization_result([x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y], diagonal, myers)
+            yield new visualization_result([x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y], diagonal, candidate_lines, true, myers)
 
             while (x < top_len && y < down_len && myers.top_string[x] == myers.down_string[y]) {
                 x++
                 y++
-                yield new visualization_result([x-1, y-1, x, y], NaN, myers)
+                yield new visualization_result([x-1, y-1, x, y], NaN, [], false, myers)
             }
 
             endpoints[diagonal] = x
@@ -209,49 +260,79 @@ function* step_myers_unidir_coroutine(myers) {
     }
 }
 
-var myers = my_myers("SMOLE", "MILESSS", "#myers")
+var myers = my_myers("INCANTANTION", "AARDVARDK", "#myers")
+
+function remove_elements(elems) {
+    var i = elems.length;
+    while (i--) {
+        elems.pop().remove()
+    }
+}
 
 var begin_stepping = function() {
     var gener = step_myers_unidir_coroutine(myers)
     var highlight_lines = []
     var normal_lines = []
-    var last_normal_line = false
-    var timer = setInterval(function() {
+    var styled_normal_lines = []
+
+    function execute_step() {
         for (;;) {
             var ret = gener.next()
             if (ret.done) {
-                clearInterval(timer)
                 break
             } else {
                 var vis_result = ret.value
-
-                if (last_normal_line !== false) {
-                    last_normal_line.attr(myers.normal_line_style)
-                }
-
-                
                 var diagonal = vis_result.diagonal
-                if (diagonal.length == 4) {
-                    for (var i=0; i < highlight_lines.length; i++) {
-                        highlight_lines[i].remove()
-                    }
-                    var line = myers.highlight_line(diagonal[1], diagonal[0], diagonal[3], diagonal[2])
-                    highlight_lines.push(line)
+                var line = vis_result.line
+                var candidate_lines = vis_result.candidate_lines
+                var reset_highlight = vis_result.reset_highlight
+
+                // Keep going if there's nothing to show
+                if (! myers.line_intersects_grid(diagonal) && ! myers.line_intersects_grid(line)) {
+                    continue
                 }
 
-                var line = vis_result.line
-                if (line[0] >= 0 && line[0] < myers.cols &&
-                    line[1] >= 0 && line[1] < myers.rows &&
-                    line[2] >= 0 && line[2] < myers.cols &&
-                    line[3] >= 0 && line[3] < myers.rows) {
-                    last_normal_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, true)
-                    last_normal_line.attr(myers.current_line_style)
-                    normal_lines.push(last_normal_line)
+
+                // Clear highlight lines and styled normal lines
+                if (reset_highlight) {
+                    remove_elements(highlight_lines)
+                    while (styled_normal_lines.length) {
+                        styled_normal_lines.pop().attr(myers.normal_line_style)
+                    }
                 }
+
+                // Add candidate lines
+                for (var i=0; i < candidate_lines.length; i++) {
+                    var candidate_line = candidate_lines[i]
+                    highlight_lines.push(myers.highlight_line(candidate_line[1], candidate_line[0], candidate_line[3], candidate_line[2], true))
+                }
+
+                if (myers.line_intersects_grid(diagonal)) {
+                    var highlight_line = myers.highlight_line(diagonal[1], diagonal[0], diagonal[3], diagonal[2], false)
+                    highlight_lines.push(highlight_line)
+                }
+
+                // Schedule an animation
+                setTimeout(function() {
+                    if (myers.line_intersects_grid(line)) {
+                        new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, true)
+                        normal_lines.push(new_line)
+
+                        // Style it
+                        new_line.attr(myers.current_line_style)
+                        styled_normal_lines.push(new_line)
+                    }
+
+                    // Schedule the next step
+                    setTimeout(execute_step, 1500)
+                }, 1500)
+
                 break
             }
         }
-    }, 750)
+    }
+
+    execute_step()
 }
 
 begin_stepping()
