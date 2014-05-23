@@ -3,15 +3,10 @@
 
 
 <script src="snap.svg-min.js"></script>
-<script src="https://traceur-compiler.googlecode.com/git/bin/traceur.js" 
-        type="text/javascript"></script>
-<script src="https://traceur-compiler.googlecode.com/git/src/bootstrap.js"
-        type="text/javascript"></script>
-
 <svg width="410" height="410" id="myers">
 </svg>
 
-<script type="module">
+<script type="text/javascript">
 
 
 var my_myers = function(down_string, top_string, ident) {
@@ -29,7 +24,7 @@ var my_myers = function(down_string, top_string, ident) {
     self.cols = cols
     self.top_string = top_string
     self.down_string = down_string
-    self.dot_radius = 4
+    self.dot_radius = 3
     self.width = svg_width
     self.height = svg_height
     self.label_xoffset = 15
@@ -162,9 +157,9 @@ var my_myers = function(down_string, top_string, ident) {
 }
 
 
-function visualization_result(line, diagonal, candidate_lines, reset_highlight, myers) {
+function visualization_result(highlight_lines, diagonal, candidate_lines, reset_highlight, myers) {
     var self = this
-    self.line = line
+    self.highlight_lines = highlight_lines
     self.candidate_lines = candidate_lines
     self.reset_highlight = reset_highlight
 
@@ -192,7 +187,7 @@ function visualization_result(line, diagonal, candidate_lines, reset_highlight, 
 }
 
 // Single directional myers diff algorithm
-function* step_myers_unidir_coroutine(myers) {
+function step_myers_unidir_coroutine(myers, visualizations) {
     var endpoints = new Array()
     endpoints[1] = 0
 
@@ -243,12 +238,20 @@ function* step_myers_unidir_coroutine(myers) {
             }
             var y = x - diagonal
 
-            yield new visualization_result([x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y], diagonal, candidate_lines, true, myers)
+            var highlight_lines = []
+
+            if (visualizations) {
+                highlight_lines.push([x - (go_down ? 0 : 1), y - (go_down ? 1 : 0), x, y]) 
+                visualizations.push(new visualization_result(highlight_lines, diagonal, candidate_lines, true, myers))
+            }
 
             while (x < top_len && y < down_len && myers.top_string[x] == myers.down_string[y]) {
                 x++
                 y++
-                yield new visualization_result([x-1, y-1, x, y], NaN, [], false, myers)
+                if (visualizations) {
+                    highlight_lines = highlight_lines.concat([[x-1, y-1, x, y]])
+                    visualizations.push(new visualization_result(highlight_lines, diagonal, candidate_lines, true, myers))
+                }
             }
 
             endpoints[diagonal] = x
@@ -269,66 +272,94 @@ function remove_elements(elems) {
     }
 }
 
+function myers_visualizer(myers) {
+    var self = this
+    var visualizations = []
+    step_myers_unidir_coroutine(myers, visualizations)
+
+    // Hackish - erase lines with nothing to show
+    var idx = visualizations.length
+    while (idx--) {
+        var vis = visualizations[idx]
+        if (! myers.line_intersects_grid(vis.diagonal)) {
+            visualizations.splice(idx, 1);
+        }
+    }
+
+    self.myers = myers
+    self.visualizations = visualizations
+    self.current_step = -1
+
+    // The following will contain Snap elements
+    self.normal_line_elems = []
+    self.highlight_line_elems = []
+    self.styled_line_elems = []
+    self.candidate_line_elems = []
+
+    self.go_to_next_step = function() {
+        self.set_step(self.current_step + 1)
+        return self.current_step + 1 < self.visualizations.length
+    }
+
+    self.set_step = function(idx) {
+        idx = Math.max(idx, -1)
+        idx = Math.min(idx, self.visualizations.length - 1)
+        self.current_step = idx
+
+        console.log("step: " + idx)
+
+        remove_elements(self.highlight_line_elems)
+        remove_elements(self.candidate_line_elems)
+
+        // Unstyle styled lines
+        while (self.styled_line_elems.length > 0) {
+            self.styled_line_elems.pop().attr(myers.normal_line_style)
+        }
+
+        if (idx >= 0) {
+            var vis = self.visualizations[idx]
+            var diagonal = vis.diagonal
+            var highlight_lines = vis.highlight_lines
+            var candidate_lines = vis.candidate_lines
+
+            // Add candidate lines
+            for (var i=0; i < candidate_lines.length; i++) {
+                var candidate_line = candidate_lines[i]
+                self.candidate_line_elems.push(myers.highlight_line(candidate_line[1], candidate_line[0], candidate_line[3], candidate_line[2], true))
+            }
+
+            // Add diagonal
+            if (self.myers.line_intersects_grid(diagonal)) {
+                var highlight_line = myers.highlight_line(diagonal[1], diagonal[0], diagonal[3], diagonal[2], false)
+                self.highlight_line_elems.push(highlight_line)
+            }
+
+            // Add normal line
+            for (var i=0; i < highlight_lines.length; i++) {
+                var line = highlight_lines[i]
+                if (self.myers.line_intersects_grid(line)) {
+                    // only animate the last line
+                    var animate = (i + 1 == highlight_lines.length)
+                    new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, animate)
+                    self.normal_line_elems.push(new_line)
+
+                    // Style it
+                    new_line.attr(myers.current_line_style)
+                    self.styled_line_elems.push(new_line)
+                }
+            }
+        }
+    }
+}
+
 var begin_stepping = function() {
-    var gener = step_myers_unidir_coroutine(myers)
-    var highlight_lines = []
-    var normal_lines = []
-    var styled_normal_lines = []
+    console.log("ALPHA")
+    var visualizer = new myers_visualizer(myers)
 
     function execute_step() {
-        for (;;) {
-            var ret = gener.next()
-            if (ret.done) {
-                break
-            } else {
-                var vis_result = ret.value
-                var diagonal = vis_result.diagonal
-                var line = vis_result.line
-                var candidate_lines = vis_result.candidate_lines
-                var reset_highlight = vis_result.reset_highlight
-
-                // Keep going if there's nothing to show
-                if (! myers.line_intersects_grid(diagonal) && ! myers.line_intersects_grid(line)) {
-                    continue
-                }
-
-
-                // Clear highlight lines and styled normal lines
-                if (reset_highlight) {
-                    remove_elements(highlight_lines)
-                    while (styled_normal_lines.length) {
-                        styled_normal_lines.pop().attr(myers.normal_line_style)
-                    }
-                }
-
-                // Add candidate lines
-                for (var i=0; i < candidate_lines.length; i++) {
-                    var candidate_line = candidate_lines[i]
-                    highlight_lines.push(myers.highlight_line(candidate_line[1], candidate_line[0], candidate_line[3], candidate_line[2], true))
-                }
-
-                if (myers.line_intersects_grid(diagonal)) {
-                    var highlight_line = myers.highlight_line(diagonal[1], diagonal[0], diagonal[3], diagonal[2], false)
-                    highlight_lines.push(highlight_line)
-                }
-
-                // Schedule an animation
-                setTimeout(function() {
-                    if (myers.line_intersects_grid(line)) {
-                        new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, true)
-                        normal_lines.push(new_line)
-
-                        // Style it
-                        new_line.attr(myers.current_line_style)
-                        styled_normal_lines.push(new_line)
-                    }
-
-                    // Schedule the next step
-                    setTimeout(execute_step, 1500)
-                }, 1500)
-
-                break
-            }
+        var has_more = visualizer.go_to_next_step()
+        if (has_more) {
+            setTimeout(execute_step, 1500)
         }
     }
 
