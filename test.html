@@ -2,9 +2,16 @@
 <body>
 
 
+<div style="width: 410">
 <script src="snap.svg-min.js"></script>
-<svg width="410" height="410" id="myers">
+<svg width="100%" height="410" id="myers">
 </svg>
+
+<br>
+<input id="slider" type="range" style="width: 100%" min="0" max="1" onInput="change_slider(this)" onMouseDown="slider_mouse_down(this)" onMouseUp="slider_mouse_up(this)">
+</div>
+
+
 
 <script type="text/javascript">
 
@@ -24,7 +31,7 @@ var my_myers = function(down_string, top_string, ident) {
     self.cols = cols
     self.top_string = top_string
     self.down_string = down_string
-    self.dot_radius = 3
+    self.dot_radius = 2
     self.width = svg_width
     self.height = svg_height
     self.label_xoffset = 15
@@ -36,7 +43,16 @@ var my_myers = function(down_string, top_string, ident) {
     self.dot_yspacing = self.grid_height / self.rows
     self.dot_xoffset = self.grid_offset + self.dot_xspacing / 2
     self.dot_yoffset = self.grid_offset + self.dot_yspacing / 2
- 
+
+    // how long line meat of the animation takes, not counting waiting
+    self.animation_time = 250
+
+    // how long we wait at the beginning
+    self.animation_start_delay = 1500
+
+    // how long we wait at the end
+    self.animation_end_delay = 500
+
     self.dot_x = function(row, col) {
         return self.dot_xoffset + col * self.dot_xspacing
     }
@@ -48,26 +64,41 @@ var my_myers = function(down_string, top_string, ident) {
     self.make_dot = function(row, col) {
         var circle = svg.circle(self.dot_x(row, col), self.dot_y(row, col), self.dot_radius)
         circle.attr({
-            fill: "white",
-            stroke: "black",
-            strokeWidth: 1,
+            fill: "#AAA",
             })
         return circle
     }
 
-    self.normal_line_style = {stroke: "black", strokeWidth: 1.5}
+    self.normal_line_style = {stroke: "#333", strokeWidth: 1.25}
     self.current_line_style = {stroke: "red", strokeWidth: 2}
 
-    self.connect_dots = function(row1, col1, row2, col2, solid, animate) {
+    self.get_easing = function(duration, delay) {
+        if (delay <= 0) {
+            return mina.linear
+        } else {
+            var delay_easing = function(progress) {
+                var start_progress = delay / (delay + duration)
+                if (progress <= start_progress) {
+                    return 0
+                } else {
+                    return (progress - start_progress) / (1.0 - start_progress)
+                }
+            }
+            return delay_easing
+        }
+    }
+
+    self.connect_dots = function(row1, col1, row2, col2, solid, animate, animation_delay) {
         var x1 = self.dot_x(row1, col1), y1 = self.dot_y(row1, col1)
         var x2 = self.dot_x(row2, col2), y2 = self.dot_y(row2, col2)
         var line = svg.line(x1, y1, animate ? x1 : x2, animate ? y1 : y2)
         line.attr(self.normal_line_style)
         if (! solid) {
-            line.attr({strokeDasharray:"1,2"})
+            line.attr({stroke: "#111", strokeDasharray:"1,2"})
         }
         if (animate) {
-            line.animate({x2: x2, y2: y2}, 250)
+            var easing = self.get_easing(self.animation_time, animation_delay)
+            line.animate({x2: x2, y2: y2}, animation_delay + self.animation_time, easing)
         }
         return line
     }
@@ -79,7 +110,7 @@ var my_myers = function(down_string, top_string, ident) {
         if (strong) {
             line.attr({stroke: "cyan", strokeWidth: 2.0, opacity: .8})
         } else {
-            line.attr({stroke: "blue", strokeWidth: 2.0, opacity: .15})
+            line.attr({stroke: "blue", strokeWidth: 2.0, opacity: .25})
         }
         return line
     }
@@ -156,12 +187,27 @@ var my_myers = function(down_string, top_string, ident) {
     return self
 }
 
+var TAG_DOWN = 1 << 0
+var TAG_TOP = 1 << 1
+function tagged_char(char, tag) {
+    var self = this
+    self.char = char
+    self.tag = tag
+}
 
-function visualization_result(highlight_lines, diagonal, candidate_lines, reset_highlight, myers) {
+function tagged_string(str, tag) {
+    var result = new Array()
+    for (var i=0; i < str.length; i++) {
+        result.push(tagged_char(str[i], tag))
+    }
+    return result
+}
+
+function visualization_result(highlight_lines, diagonal, candidate_lines, wants_delay, myers) {
     var self = this
     self.highlight_lines = highlight_lines
     self.candidate_lines = candidate_lines
-    self.reset_highlight = reset_highlight
+    self.wants_delay = wants_delay
 
     if (isNaN(diagonal)) {
         self.diagonal = []
@@ -187,9 +233,12 @@ function visualization_result(highlight_lines, diagonal, candidate_lines, reset_
 }
 
 // Single directional myers diff algorithm
-function step_myers_unidir_coroutine(myers, visualizations) {
+function step_myers_unidir(myers, visualizations) {
     var endpoints = new Array()
     endpoints[1] = 0
+
+    var intermediate_strings = new Array()
+    intermediate_strings[1] = tagged_string(myers.down_string, TAG_DOWN)
 
     var top_len = myers.top_string.length
     var down_len = myers.down_string.length
@@ -213,6 +262,7 @@ function step_myers_unidir_coroutine(myers, visualizations) {
             }
 
             var go_down
+
             var candidate_lines = []
             if (diagonal == -step) {
                 var top_x = endpoints[diagonal+1]
@@ -250,7 +300,7 @@ function step_myers_unidir_coroutine(myers, visualizations) {
                 y++
                 if (visualizations) {
                     highlight_lines = highlight_lines.concat([[x-1, y-1, x, y]])
-                    visualizations.push(new visualization_result(highlight_lines, diagonal, candidate_lines, true, myers))
+                    visualizations.push(new visualization_result(highlight_lines, diagonal, candidate_lines, false, myers))
                 }
             }
 
@@ -263,7 +313,7 @@ function step_myers_unidir_coroutine(myers, visualizations) {
     }
 }
 
-var myers = my_myers("INCANTANTION", "AARDVARDK", "#myers")
+var myers = my_myers("AEAEAEAEAE", "EEEEEEEEEE", "#myers")
 
 function remove_elements(elems) {
     var i = elems.length;
@@ -275,7 +325,7 @@ function remove_elements(elems) {
 function myers_visualizer(myers) {
     var self = this
     var visualizations = []
-    step_myers_unidir_coroutine(myers, visualizations)
+    step_myers_unidir(myers, visualizations)
 
     // Hackish - erase lines with nothing to show
     var idx = visualizations.length
@@ -296,17 +346,21 @@ function myers_visualizer(myers) {
     self.styled_line_elems = []
     self.candidate_line_elems = []
 
+    // returns the delay for the next step, or -1 if done
     self.go_to_next_step = function() {
-        self.set_step(self.current_step + 1)
-        return self.current_step + 1 < self.visualizations.length
+        var new_delay = self.set_step(self.current_step + 1, true)
+        return self.current_step + 1 < self.visualizations.length ? new_delay : -1
     }
 
-    self.set_step = function(idx) {
-        idx = Math.max(idx, -1)
-        idx = Math.min(idx, self.visualizations.length - 1)
-        self.current_step = idx
+    self.set_step = function(new_step, should_animate) {
+        new_step = Math.max(new_step, -1)
+        new_step = Math.min(new_step, self.visualizations.length - 1)
+        var old_step = self.current_step
+        self.current_step = new_step
 
-        console.log("step: " + idx)
+        var time_until_next_step = 0
+
+        console.log("step: " + old_step + " -> " + new_step)
 
         remove_elements(self.highlight_line_elems)
         remove_elements(self.candidate_line_elems)
@@ -316,11 +370,11 @@ function myers_visualizer(myers) {
             self.styled_line_elems.pop().attr(myers.normal_line_style)
         }
 
-        if (idx >= 0) {
-            var vis = self.visualizations[idx]
+        if (new_step >= 0) {
+            var vis = self.visualizations[new_step]
             var diagonal = vis.diagonal
-            var highlight_lines = vis.highlight_lines
             var candidate_lines = vis.candidate_lines
+            var wants_delay = vis.wants_delay
 
             // Add candidate lines
             for (var i=0; i < candidate_lines.length; i++) {
@@ -334,41 +388,98 @@ function myers_visualizer(myers) {
                 self.highlight_line_elems.push(highlight_line)
             }
 
-            // Add normal line
-            for (var i=0; i < highlight_lines.length; i++) {
-                var line = highlight_lines[i]
-                if (self.myers.line_intersects_grid(line)) {
-                    // only animate the last line
-                    var animate = (i + 1 == highlight_lines.length)
-                    new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, animate)
-                    self.normal_line_elems.push(new_line)
+            // Add normal lines
+            if (new_step > old_step) {
+                for (var i = old_step + 1; i <= new_step; i++) {
+                    var highlight_lines = self.visualizations[i].highlight_lines
+                    for (var j=0; j < highlight_lines.length; j++) {
+                        var line = highlight_lines[j]
+                        if (self.myers.line_intersects_grid(line)) {
+                            // only animate the last line
+                            var animate = should_animate && (i == new_step) && (j + 1 == highlight_lines.length)
+                            var delay = (wants_delay && animate) ? myers.animation_start_delay : 0
+                            new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, animate, delay)
+                            self.normal_line_elems.push(new_line)
 
-                    // Style it
-                    new_line.attr(myers.current_line_style)
-                    self.styled_line_elems.push(new_line)
+                            if (animate) {
+                                time_until_next_step = Math.max(time_until_next_step, delay + myers.animation_time + myers.animation_end_delay)
+                            }
+
+                            // Style the last lines
+                            if (i == new_step) {
+                                new_line.attr(myers.current_line_style)
+                                self.styled_line_elems.push(new_line)
+                            }
+                        }
+                    }
+                }
+            } else if (old_step > new_step) {
+                // Going backwards. Remove normal lines.
+                var num_to_remove = 0
+                for (var i = old_step; i > new_step; i--) {
+                    num_to_remove += self.visualizations[i].highlight_lines.length
+                }
+                var removed = self.normal_line_elems.splice(self.normal_line_elems.length - num_to_remove, num_to_remove)
+                remove_elements(removed)
+
+                // Style the last lines
+                if (new_step >= 0) {
+                    var highlight_lines = self.visualizations[new_step].highlight_lines
+                    for (var j=0; j < highlight_lines.length; j++) {
+                        // Style the last lines
+                        var last_line = self.normal_line_elems[self.normal_line_elems.length - j - 1]
+                        console.log("Style " + last_line)
+                        last_line.attr(myers.current_line_style)
+                        self.styled_line_elems.push(last_line)
+                    }
                 }
             }
         }
+
+        return time_until_next_step
+    }
+
+    self.step_count = function() {
+        return self.visualizations.length
     }
 }
 
-var begin_stepping = function() {
-    console.log("ALPHA")
-    var visualizer = new myers_visualizer(myers)
+var visualizer = new myers_visualizer(myers)
+var slider = document.getElementById('slider')
+var slider_down = false
+slider.min = 0
+slider.max = visualizer.step_count()
 
-    function execute_step() {
-        var has_more = visualizer.go_to_next_step()
-        if (has_more) {
-            setTimeout(execute_step, 1500)
-        }
+function execute_step() {
+    var timeout = -1
+    var reschedule = false
+    if (slider_down) {
+        // do nothing
+        timeout = 2000
+    } else {
+        timeout = visualizer.go_to_next_step()
+        slider.value = visualizer.current_step
     }
+    if (timeout >= 0) {
+        setTimeout(execute_step, timeout)
+    }
+}
+execute_step()
 
-    execute_step()
+function change_slider(self) {
+    visualizer.set_step(self.value, false)
 }
 
-begin_stepping()
+function slider_mouse_down(self) {
+    slider_down = true
+}
+
+function slider_mouse_up(self) {
+    slider_down = false
+}
 
 </script>
+
 
 </body>
 </html>
