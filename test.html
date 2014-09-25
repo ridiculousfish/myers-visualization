@@ -140,13 +140,18 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
             }
         }
 
-        self.connect_dots = function(row1, col1, row2, col2, solid, animate, animation_delay) {
+        selfCONNECT_DOT_STYLE_DOTTED = 'dotted'
+        self.CONNECT_DOT_STYLE_SOLID = 'solid'
+        self.CONNECT_DOT_STYLE_DOTTED_EMPHASIZED = 'emphasized'
+        self.connect_dots = function(row1, col1, row2, col2, dot_style, animate, animation_delay) {
             var x1 = self.dot_x(row1, col1), y1 = self.dot_y(row1, col1)
             var x2 = self.dot_x(row2, col2), y2 = self.dot_y(row2, col2)
             var line = svg.line(x1, y1, animate ? x1 : x2, animate ? y1 : y2)
             line.attr(self.normal_line_style)
-            if (! solid) {
-                line.attr({stroke: "#111", strokeDasharray:"1,5"})
+            if (dot_style == self.CONNECT_DOT_STYLE_DOTTED) {
+                line.attr({stroke: "#111", strokeDasharray:"1,8"})
+            } else if (dot_style == self.CONNECT_DOT_STYLE_DOTTED_EMPHASIZED) {
+                line.attr({stroke: "#000", strokeDasharray:"1,2"})
             }
             if (animate) {
                 var easing = self.get_easing(self.animation_time, animation_delay)
@@ -224,15 +229,15 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
             for (var x=0; x < self.cols; x++) {
                 if (y + 1 < self.rows) {
                     // down path
-                    self.connect_dots(y, x, y+1, x, false, false)
+                    self.connect_dots(y, x, y+1, x, self.CONNECT_DOT_STYLE_DOTTED, false)
                 }
                 if (x + 1 < self.cols) {
                     // right path
-                    self.connect_dots(y, x, y, x+1, false, false)
+                    self.connect_dots(y, x, y, x+1, self.CONNECT_DOT_STYLE_DOTTED, false)
                 }
 
                 if (y < down_string.length && x < top_string.length && down_string[y] == top_string[x]) {
-                    self.connect_dots(y, x, y + 1, x+1, false, false)
+                    self.connect_dots(y, x, y + 1, x+1, self.CONNECT_DOT_STYLE_DOTTED_EMPHASIZED, false)
                 }
             }
         }
@@ -327,7 +332,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
                                 // only animate the last line
                                 var animate = should_animate && (i == new_step) && (j + 1 == highlight_lines.length)
                                 var delay = (wants_delay && animate) ? myers.animation_start_delay : 0
-                                new_line = myers.connect_dots(line[1], line[0], line[3], line[2], true, animate, delay)
+                                new_line = myers.connect_dots(line[1], line[0], line[3], line[2], myers.CONNECT_DOT_STYLE_SOLID, animate, delay)
                                 self.normal_line_elems.push(new_line)
 
                                 if (animate) {
