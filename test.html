@@ -66,7 +66,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
 
     function make_myers(down_string, top_string) {
         var self = this
-        
+
         rows = down_string.length + 1
         cols = top_string.length + 1
 
@@ -85,7 +85,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
         self.width = svg_width
         self.height = svg_height
         self.label_xoffset = 15
-        self.label_yoffset = 15 
+        self.label_yoffset = 15
         self.grid_offset = 5
         self.grid_width = self.width - 2 * self.grid_offset
         self.grid_height = self.height - 2 * self.grid_offset
@@ -140,7 +140,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
             }
         }
 
-        selfCONNECT_DOT_STYLE_DOTTED = 'dotted'
+        self.CONNECT_DOT_STYLE_DOTTED = 'dotted'
         self.CONNECT_DOT_STYLE_SOLID = 'solid'
         self.CONNECT_DOT_STYLE_DOTTED_EMPHASIZED = 'emphasized'
         self.connect_dots = function(row1, col1, row2, col2, dot_style, animate, animation_delay) {
@@ -282,7 +282,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
                 return -1
             } else {
                 var new_delay = self.set_step(self.current_step + 1, true)
-                return self.current_step + 1 < self.visualizations.length ? new_delay : -1            
+                return self.current_step + 1 < self.visualizations.length ? new_delay : -1
             }
         }
 
@@ -424,7 +424,7 @@ function myers_ui(svg_id, slider_id, diff_id, text_input_1_id, text_input_2_id) 
                         break;
                     case TAG_DOWN | TAG_DELETED:
                         classname = 'intermediate_diff_down_deleted'
-                        break;                    
+                        break;
                     case TAG_TOP:
                         classname = 'intermediate_diff_top'
                         break;
@@ -498,4 +498,3 @@ myers_ui('#myers', '#slider', '#intermediate_diff', '#text1', '#text2')
 
 </body>
 </html>
-
