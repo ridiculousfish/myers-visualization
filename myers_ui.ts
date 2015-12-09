@@ -19,7 +19,7 @@ class Cursor {
   strokes:Line[] = []
 
   tryStroke() {
-    var pointCount = this.points.length
+    let pointCount = this.points.length
     if (pointCount >= 2) {
       this.strokes.push(new Line(this.points[pointCount-2], this.points[pointCount-1]))
     }
@@ -59,8 +59,8 @@ class Cursor {
 
   // returns alternating x, y coordinates, suitable for SVG
   coordinates():number[] {
-    var result:number[] = []
-    for (var i = 0; i < this.points.length; i++) {
+    let result:number[] = []
+    for (let i = 0; i < this.points.length; i++) {
       result.push(this.points[i].x, this.points[i].y)
     }
     return result
@@ -92,13 +92,13 @@ function assert(condition, message) {
 }
 
 function ewidth(svg:Snap.Element):number {
-  var result = <number>svg.attr('width')
+  let result = <number>svg.attr('width')
   assert(!isNaN(result), "width is NaN")
   return result
 }
 
 function eheight(svg:Snap.Element):number {
-  var result = <number>svg.attr('height')
+  let result = <number>svg.attr('height')
   assert(!isNaN(result), "height is NaN")
   return result
 }
@@ -126,7 +126,7 @@ class MyersGrid {
   floodColor = '#AAA'
   gridColor = '#777'
   fillColor = '#B6DCFF'
-  snakeFillColor = '#B6DCFF'
+  snakeFillColor = '#CCDDFF'
 
 
   crosses:Snap.Element[] = []
@@ -153,9 +153,9 @@ class MyersGrid {
     this.makeGrid()
 
     // make crosses
-    for (var y = 0; y < this.rows; y++) {
-      for (var x=0; x < this.cols; x++) {
-        var dirs = {
+    for (let y = 0; y < this.rows; y++) {
+      for (let x=0; x < this.cols; x++) {
+        let dirs = {
           north: y > 0 || (y==0 && x==0),
           east: x+1 < this.cols,
           south: y+1 < this.rows,
@@ -166,8 +166,8 @@ class MyersGrid {
     }
 
     // make snakes
-    for (var y = 0; y+1 < this.rows; y++) {
-      for (var x=0; x+1 < this.rows; x++) {
+    for (let y = 0; y+1 < this.rows; y++) {
+      for (let x=0; x+1 < this.rows; x++) {
         if (this.input.left[y] == this.input.top[x]) {
           this.makeSnake(new GridLocation(x, y))
         }
@@ -189,109 +189,147 @@ class MyersGrid {
   }
 
   makeGrid() {
-    var attrs = { stroke: this.gridColor, 'strokeWidth': 0.5}
+    let attrs = { stroke: this.gridColor, 'strokeWidth': 0.5}
     // horizontal lines
-    for (var r=0; r<this.rows; r++) {
-      var y = this.pointForLocation(new GridLocation(0, r)).y
+    for (let r=0; r<this.rows; r++) {
+      let y = this.pointForLocation(new GridLocation(0, r)).y
       this.svg.line(0, y, this.width, y).attr(attrs)
     }
     // vertical lines
-    for (var c=0; c < this.cols; c++) {
-      var x = this.pointForLocation(new GridLocation(c, 0)).x
+    for (let c=0; c < this.cols; c++) {
+      let x = this.pointForLocation(new GridLocation(c, 0)).x
       this.svg.line(x, 0, x, this.height).attr(attrs)
     }
   }
 
   makeCross(center:GridLocation, extend:Ordinals, snake:boolean) {
-    var north = extend.north, east = extend.east
-    var south = extend.south, west = extend.west
+    let north = extend.north, east = extend.east
+    let south = extend.south, west = extend.west
+
+    let fillAttrs = { stroke: 'none', fill: this.fillColor}
+    let strokeAttrs = { fill: 'none', stroke: 'black', 'strokeWidth': 1.25}
+    let centerFraction = .7
+    let centerPoint = this.pointForLocation(center)
+    let rx = this.xSpacing * centerFraction/2.0
+    let ry = this.ySpacing * centerFraction/2.0
+
+    // how wide the bridges are
+    let bridgeFraction = .25
+    // width of a horizontally/vertically oriented bridge
+    let bridgeWidthH = bridgeFraction * this.xSpacing
+    let bridgeWidthV = bridgeFraction * this.ySpacing
+
+    // length of a horizontally / vertically oriented bridge
+    let bridgeLengthH = this.xSpacing/2 - rx
+    let bridgeLengthV = this.ySpacing/2 - ry
+
+    let makeCenterEllipse = () => {
+      return this.svg.ellipse(centerPoint.x, centerPoint.y, rx, ry)
+    }
+
+    let makeBridge = (dir:Ordinals, stroke:boolean) => {
+      // exactly one of the ordinals should be set
+      // always describe the rectangle clockwise from upper left
+      let horizontal = dir.east || dir.west
+      let dx = horizontal ? bridgeLengthH : bridgeWidthV
+      let dy = horizontal ? bridgeWidthH : bridgeLengthV
+      let startX = centerPoint.x, startY = centerPoint.y
+      if (horizontal) {
+        startX += dir.east ? rx : -(rx + dx)
+        startY += -dy/2
+      } else { // vertical
+        startX += -dx/2
+        startY += dir.north ? -(ry + bridgeLengthV) : ry
+      }
+
+      // extend it by a little bit in its length direction
+      let overlap = 2
+      if (horizontal) {
+        startX -= overlap
+        dx += 2*overlap
+      } else {
+        startY -= overlap
+        dy += 2*overlap
+      }
+
+      if (stroke) {
+        let group:any = this.svg.group()
+        if (horizontal) {
+          group.add(this.svg.line(startX, startY, startX + dx, startY))
+          group.add(this.svg.line(startX, startY + dy, startX + dx, startY + dy))
+        } else {
+          group.add(this.svg.line(startX, startY, startX, startY + dy))
+          group.add(this.svg.line(startX + dx, startY, startX + dx, startY + dy))
+        }
+        return group
+      } else {
+        return this.svg.rect(startX, startY, dx, dy)
+      }
+    }
+
     // fraction of a square taken up by the center
-    var centerFraction = .33
-    var horizShort = this.xSpacing * centerFraction
-    var horizLong = (this.xSpacing - horizShort) / 2
+    this.crosses.push(makeCenterEllipse().attr(fillAttrs))
+    this.crosses.push(makeCenterEllipse().attr(strokeAttrs))
 
-    var vertShort = this.ySpacing * centerFraction
-    var vertLong = (this.ySpacing - vertShort) / 2
+    let dirs:Ordinals[] = []
+    if (extend.north) dirs.push({north:true})
+    if (extend.east) dirs.push({east:true})
+    if (extend.south) dirs.push({south:true})
+    if (extend.west) dirs.push({west:true})
 
-    // we don't fill the edges of the crosses
-    var strokeLines : number[][] = []
-
-    var c = new Cursor(this.pointForLocation(center))
-
-    // northwest
-    c.move(-horizShort/2, -vertShort/2)
-
-    // northwest -> southwest
-    c.moveX(west ? -horizLong : 0)
-    c.moveY(vertShort, !west)
-    c.moveX(west ? horizLong : 0)
-
-    // southwest -> southeast
-    c.moveY(south ? vertLong : 0)
-    c.moveX(horizShort, !south)
-    c.moveY(south ? -vertLong : 0)
-
-    // southeast -> northeast
-    c.moveX(east ? horizLong : 0)
-    c.moveY(-vertShort, !east)
-    c.moveX(east ? -horizLong : 0)
-
-    // northwest -> northeast
-    c.moveY(north ? -horizLong : 0)
-    c.moveX(-horizShort, !north)
-    c.moveY(north ? horizLong : 0)
-
-    var fillAttrs = { stroke: 'none', fill: this.fillColor}
-    this.crosses.push(this.svg.polygon(c.coordinates()).attr(fillAttrs))
-
-    var strokeAttrs = { stroke: 'black', 'strokeWidth': 1.25, fill: 'none'}
-    this.crosses.push(this.addStrokes(c).attr(strokeAttrs))
+    for (var i=0; i < dirs.length; i++) {
+      this.crosses.push(makeBridge(dirs[i], false).attr(fillAttrs))
+      this.crosses.push(makeBridge(dirs[i], true).attr(strokeAttrs))
+    }
   }
 
   makeSnake(centerGL:GridLocation)  {
-    var center = this.pointForLocation(centerGL)
-    var rectFraction = .33
-    var rectThickness = rectFraction * (this.xSpacing + this.ySpacing) / 2.0
+    let center = this.pointForLocation(centerGL)
+    let rectFraction = .3
+    let rectThickness = rectFraction * (this.xSpacing + this.ySpacing) / 2.0
 
-    var start = center
-    var target = this.pointForLocation(centerGL.offset(1, 1))
-    var distance = hypot(target.x - start.x, target.y - start.y)
+    let start = center
+    let target = this.pointForLocation(centerGL.offset(1, 1))
+    let distance = hypot(target.x - start.x, target.y - start.y)
 
     // rotate a rectangle centered at the origin
     // conceptually the width of the rectangle is the line that connects the
     // start and target points, and the height is perpindicular
-    var angle = Math.atan2(target.y - start.y, target.x - start.x)
+    let angle = Math.atan2(target.y - start.y, target.x - start.x)
     function rotate(x:number, y:number):Point {
       return {
         x:x * Math.cos(angle) - y * Math.sin(angle),
         y:x * Math.sin(angle) + y * Math.cos(angle)
       }
     }
-    var short = rotate(0, rectThickness)
+    let short = rotate(0, rectThickness)
     short.x = Math.abs(short.x)
     short.y = Math.abs(short.y)
 
-    var long = rotate(distance, 0)
+    let long = rotate(distance, 0)
     long.x = Math.abs(long.x)
     long.y = Math.abs(long.y)
 
-    var c = new Cursor(center)
+    let c = new Cursor(center)
     c.move(short.x/2, -short.y/2) //northwest
     c.move(-short.x, short.y) //southwest
     c.move(long.x, long.y) //southeast
     c.move(short.x, -short.y) //northeast
     c.close()
 
-    var pathAttrs = { fill: this.snakeFillColor }
-    var borderAttrs = { fill: 'none', stroke: 'black', strokeWidth: 1.25 }
+    let colors = [this.fillColor, this.snakeFillColor, this.fillColor]
+    let grad = this.svg.gradient("l(.2, .2, .8, .8)" + colors.join('-'))
+
+    let pathAttrs = { fill: grad /*this.snakeFillColor*/ }
+    let borderAttrs = { fill: 'none', stroke: 'black', strokeWidth: 1.25 }
     this.snakes.push(this.svg.polygon(c.coordinates()).attr(pathAttrs))
 
     // do something hacky
-    var squish = .60
-    var slideRatio = .6
-    var slideX = (long.x * (1-squish)) * slideRatio
-    var slideY = (long.y * (1-squish)) * slideRatio
-    var squishCenter = {x:center.x + slideX, y:center.y + slideY}
+    let squish = .6
+    let slideRatio = .6
+    let slideX = (long.x * (1-squish)) * slideRatio
+    let slideY = (long.y * (1-squish)) * slideRatio
+    let squishCenter = {x:center.x + slideX, y:center.y + slideY}
     long.x *= squish
     long.y *= squish
 
@@ -325,7 +363,7 @@ class MyersUI {
     this.svg = Snap(this.ids.svg)
     this.svg.clear()
 
-    var gridSvg = Snap(380, 380)
+    let gridSvg = Snap(380, 380)
     this.grid = new MyersGrid(gridSvg, this.input)
     this.svg.append(gridSvg)
 
