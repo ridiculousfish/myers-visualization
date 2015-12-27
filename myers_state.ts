@@ -74,14 +74,6 @@ function pathIndexes(paths:Path[]): number[] {
   return result
 }
 
-function copyPaths(paths:Path[]): Path[] {
-  let result : Path[] = []
-  for (var idx of pathIndexes(paths)) {
-    result[idx] = paths[idx]
-  }
-  return result
-}
-
 class Tag {
   constructor(top:boolean, down:boolean) {}
   down:boolean = false
@@ -148,6 +140,26 @@ class MyersContext {
     return result
   }
 
+  // Remove any points outside of our range
+  trim1Path(path:Path): Path {
+    let result = Path.Empty.copy()
+    for (let point of path.points) {
+      if (point.x < this.top.length && point.y < this.left.length) {
+        result.points.push(point)
+      }
+    }
+    return result
+  }
+
+  trimPaths(paths:Path[]): Path[] {
+    let result : Path[] = []
+    for (var idx of pathIndexes(paths)) {
+      result[idx] = this.trim1Path(paths[idx])
+    }
+    return result
+  }
+
+
   // Single directional myers diff algorithm
   unidir() {
     const tthis = this // workaround https://github.com/Microsoft/TypeScript/issues/6021
@@ -205,7 +217,6 @@ class MyersContext {
         // Skip cases that go off the grid
         // Note we check >, not >=, because we have a terminating dots at x == top_len / y == down_len
         if (x > topLen || y > downLen) {
-            endpoints[diagonal] = bestPath.plus({x:x, y:y})
             continue
         }
 
@@ -217,8 +228,8 @@ class MyersContext {
         var cursorPath = bestPath.plus({x:x, y:y})
 
         let state = tthis.pushState(diagonal)
-        state.pathCollection = copyPaths(endpoints)
-        state.path = cursorPath
+        state.pathCollection = tthis.trimPaths(endpoints)
+        state.path = tthis.trim1Path(cursorPath)
         state.candidates = candidateLines
         state.highlights = highlightLines
 
@@ -235,8 +246,8 @@ class MyersContext {
             //
             highlightLines = highlightLines.concat([Line.make(x-1, y-1, x, y)])
             let state = tthis.pushState(diagonal)
-            state.pathCollection = copyPaths(endpoints)
-            state.path = cursorPath
+            state.pathCollection = tthis.trimPaths(endpoints)
+            state.path = tthis.trim1Path(cursorPath)
             state.candidates = candidateLines
             state.highlights = highlightLines
             state.topLevel = false

@@ -115,7 +115,7 @@ class MyersStateVisualization {
     let uniquer : { [key:string]:boolean; } = {};
     for (let idx of pathIndexes(state.pathCollection)) {
       let path = state.pathCollection[idx]
-      this.addPath(path, uniquer).attr({opacity: .5})
+      this.addPath(path, uniquer).attr({opacity: .33})
     }
     this.addPath(state.path, {})
   }
@@ -155,7 +155,7 @@ class MyersStateVisualization {
   }
 
   addDiagonal(diagonal:number) {
-    let diagonalAttr = { stroke: "#0077FF", 'strokeWidth': 5.5, opacity:.5, strokeLinecap:"round"}
+    let diagonalAttr = { stroke: "#FFFF00", 'strokeWidth': 5.5, opacity:.5, strokeLinecap:"round"}
 
     let startX = diagonal >= 0 ? diagonal : 0
     let startY = diagonal <= 0 ? -diagonal : 0
@@ -456,8 +456,20 @@ class MyersUI {
   }
 
   timerGo() {
-    if (this.stateIndex + 1 < this.states.length) {
-      this.setStateIndex(this.stateIndex + 1)
+    let newIdx = this.stateIndex + 1
+    if (newIdx < this.states.length) {
+      this.setStateIndex(newIdx)
+
+      // Find the number of top level states at or before newIdx
+      var topLevelCount = 0;
+      for (var cursor = newIdx; cursor >= 0; cursor--) {
+        if (this.states[cursor].topLevel) {
+          topLevelCount++;
+        }
+      }
+      let slider = <HTMLInputElement>$(this.ids.slider)[0]
+      slider.value = "" + (topLevelCount - 1)
+
     }
     this.startTimer()
   }
