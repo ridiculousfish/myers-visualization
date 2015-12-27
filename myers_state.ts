@@ -49,7 +49,37 @@ class Path {
     return this.points[idx]
   }
 
+  description():string {
+    let result = ""
+    for (let i=0; i < this.points.length; i++) {
+      let point = this.points[i]
+      if (i > 0) {
+        result += " - "
+      }
+      result += point.x + "," + point.y
+    }
+    return result
+  }
+
   static Empty = new Path([])
+}
+
+function pathIndexes(paths:Path[]): number[] {
+  let result : number[] = []
+  for (var k in paths) {
+    if (paths.hasOwnProperty(k)) {
+      result.push(k)
+    }
+  }
+  return result
+}
+
+function copyPaths(paths:Path[]): Path[] {
+  let result : Path[] = []
+  for (var idx of pathIndexes(paths)) {
+    result[idx] = paths[idx]
+  }
+  return result
 }
 
 class Tag {
@@ -122,7 +152,7 @@ class MyersContext {
   unidir() {
     const tthis = this // workaround https://github.com/Microsoft/TypeScript/issues/6021
     let endpoints:Path[] = []
-    endpoints[1] = new Path([{x:0, y:0}])
+    endpoints[1] = new Path([{x:0, y:-1}])
 
     let topLen = tthis.top.length
     let downLen = tthis.left.length
@@ -187,7 +217,7 @@ class MyersContext {
         var cursorPath = bestPath.plus({x:x, y:y})
 
         let state = tthis.pushState(diagonal)
-        state.pathCollection = endpoints.slice(0)
+        state.pathCollection = copyPaths(endpoints)
         state.path = cursorPath
         state.candidates = candidateLines
         state.highlights = highlightLines
@@ -205,7 +235,7 @@ class MyersContext {
             //
             highlightLines = highlightLines.concat([Line.make(x-1, y-1, x, y)])
             let state = tthis.pushState(diagonal)
-            state.pathCollection = endpoints.slice(0)
+            state.pathCollection = copyPaths(endpoints)
             state.path = cursorPath
             state.candidates = candidateLines
             state.highlights = highlightLines

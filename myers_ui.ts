@@ -113,9 +113,10 @@ class MyersStateVisualization {
     this.svg.clear()
     this.addDiagonal(state.diagonal)
     let uniquer : { [key:string]:boolean; } = {};
-    state.pathCollection.forEach(path => {
+    for (let idx of pathIndexes(state.pathCollection)) {
+      let path = state.pathCollection[idx]
       this.addPath(path, uniquer).attr({opacity: .5})
-    })
+    }
     this.addPath(state.path, {})
   }
 
