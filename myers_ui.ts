@@ -1,5 +1,6 @@
 /// <reference path='./myers_state.ts'/>
 /// <reference path='./snapsvg.d.ts'/>
+/// <reference path='./jquery.d.ts'/>
 
 class GridLocation {
   constructor(public x:number, public y:number) {}
@@ -34,10 +35,6 @@ class Cursor {
       }
     }
     return this
-  }
-
-  moveAsIfFrom(start:Point, end:Point):Cursor {
-    return this.move(end.x - start.x, end.y - start.y)
   }
 
   moveX(dx:number, addStroke:boolean = true):Cursor {
@@ -103,9 +100,81 @@ function eheight(svg:Snap.Element):number {
   return result
 }
 
-class MyersIDs {
-  constructor(public svg:string, public slider:string, public diff:string,
-    public text_input_1:string, public text_input_2:string) {}
+class MyersStateVisualization {
+  svg:Paper
+  grid: MyersGrid
+
+  constructor(svg:Paper, grid:MyersGrid) {
+    this.svg = svg
+    this.grid = grid
+  }
+
+  setState(state:MyersState) {
+    this.svg.clear()
+    this.addDiagonal(state.diagonal)
+    let uniquer : { [key:string]:boolean; } = {};
+    state.pathCollection.forEach(path => {
+      this.addPath(path, uniquer).attr({opacity: .5})
+    })
+    this.addPath(state.path, {})
+  }
+
+  addPath(path:Path, uniquer:{ [key:string]:boolean; }):Snap.Element {
+    let tthis = this
+    let cpointCoords : number[] = []
+    var lastCPoint : Point = undefined
+    let addPoint = function(p:Point) {
+      let cpoint = tthis.grid.pointForLocation(new GridLocation(p.x, p.y))
+      let key = p.x + "," + p.y
+      if (!uniquer[key]) {
+        uniquer[key] = true
+        // hack!
+        if (lastCPoint && cpointCoords.length == 0) {
+          cpointCoords.push(lastCPoint.x, lastCPoint.y)
+        }
+        cpointCoords.push(cpoint.x, cpoint.y)
+      }
+      lastCPoint = cpoint
+    }
+
+    // hack!
+    addPoint({x:0, y:-1})
+    for (let i=0; i < path.points.length; i++) {
+      addPoint(path.at(i))
+    }
+    let lineAttr = {
+      stroke: "#0000FF",
+      strokeWidth: 3.5,
+      opacity:1,
+//      strokeLinecap:"round",
+      strokeLinejoin:"round",
+      fill:'none'}
+    let cline = this.svg.polyline(cpointCoords).attr(lineAttr)
+    return cline
+  }
+
+  addDiagonal(diagonal:number) {
+    let diagonalAttr = { stroke: "#0077FF", 'strokeWidth': 5.5, opacity:.5, strokeLinecap:"round"}
+
+    let startX = diagonal >= 0 ? diagonal : 0
+    let startY = diagonal <= 0 ? -diagonal : 0
+
+    // blech
+    let endX = startX + 1
+    let endY = startY + 1
+    while (endX+1 < this.grid.cols && endY+1 < this.grid.rows) {
+      endX++
+      endY++
+    }
+
+    let startPoint = this.grid.pointForLocation(new GridLocation(startX, startY))
+    let endPoint = this.grid.pointForLocation(new GridLocation(endX, endY))
+
+    let line = this.svg.line(startPoint.x, startPoint.y, endPoint.x, endPoint.y)
+    line.attr(diagonalAttr)
+  }
+
+
 }
 
 class MyersGrid {
@@ -349,23 +418,96 @@ class MyersUI {
   ids:MyersIDs
   input:MyersInput
   svg:Paper
+  timer:number = 0
 
   grid:MyersGrid
+  stateVisualization:MyersStateVisualization
+  events:MyersEvents
+  stateIndex:number = -1
+  states:MyersState[] = []
+  topLevelStateIndexes:number[]
 
-  constructor(ids:MyersIDs, input:MyersInput) {
+  constructor(ids:MyersIDs) {
     this.ids = ids
-    this.input = input
-
-    this.buildUI()
+    this.events = new MyersEvents(ids)
+    this.events.install()
+    this.events.addObserver(this)
+    this.svg = Snap(this.ids.svg)
   }
 
-  buildUI() {
-    this.svg = Snap(this.ids.svg)
+  sliderChanged(newValue:number) {
+    assert(newValue >= 0 && newValue < this.topLevelStateIndexes.length, "Wrong newValue")
+    let stateIndex = this.topLevelStateIndexes[newValue]
+    this.stateVisualization.setState(this.states[stateIndex])
+  }
+
+  stopTimer() {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = 0
+    }
+  }
+
+  startTimer() {
+    let tthis = this
+    this.stopTimer()
+    this.timer = setTimeout(function() {tthis.timerGo()}, 1000)
+  }
+
+  timerGo() {
+    if (this.stateIndex + 1 < this.states.length) {
+      this.setStateIndex(this.stateIndex + 1)
+    }
+    this.startTimer()
+  }
+
+  mouseDown() {
+    this.stopTimer()
+  }
+
+  mouseUp() {
+    this.startTimer()
+  }
+
+  setStateIndex(idx:number) {
+    assert(idx >= 0 && idx < this.states.length, "Bad state index")
+    this.stateVisualization.setState(this.states[idx])
+    this.stateIndex = idx
+  }
+
+  resetWithInput(input:MyersInput, states:MyersState[]) {
+    this.input = input
+    this.states = states
+    if (this.states.length == 0) {
+      this.states = [MyersState.EmptyState()]
+    }
     this.svg.clear()
+
+    // populate topLevelStateIndexes
+    this.topLevelStateIndexes = [0]
+    for (let i=1; i < states.length; i++) {
+      if (states[i].topLevel) {
+        this.topLevelStateIndexes.push(i)
+      }
+    }
 
     let gridSvg = Snap(380, 380)
     this.grid = new MyersGrid(gridSvg, this.input)
     this.svg.append(gridSvg)
 
+    let visualizationSvg = Snap(380, 380)
+    this.stateVisualization = new MyersStateVisualization(visualizationSvg, this.grid)
+    this.svg.append(visualizationSvg)
+
+    assert(this.states.length > 0, "Internal error: should not have empty state")
+
+    let jslider = $(this.ids.slider)
+    let slider = <HTMLInputElement>jslider[0]
+    slider.min = "0"
+    slider.max = "" + (this.topLevelStateIndexes.length-1)
+    slider.value = "0"
+
+    this.setStateIndex(0)
+    this.startTimer()
   }
 }

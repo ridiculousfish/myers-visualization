@@ -20,6 +20,8 @@
         "!node_modules/**"
     ],
     "files": [
+        "jquery.d.ts",
+        "myers_events.ts",
         "myers_state.ts",
         "myers_ui.ts",
         "snapsvg.d.ts"

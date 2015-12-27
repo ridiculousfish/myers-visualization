@@ -11,11 +11,45 @@ class CPoint {
   }
 }
 
+function moved(p:Point, dx:number=0, dy:number=0):CPoint {
+  return new CPoint(p.x + dx, p.y + dy)
+}
+
 class Line {
   constructor(public start:Point, public end:Point) {}
   static make(x1:number, y1:number, x2:number, y2:number):Line {
     return new Line({x:x1, y:y1}, {x:x2, y:y2})
   }
+}
+
+class Path {
+  points:Point[]
+
+  constructor(points:Point[]) {
+    this.points = points.slice(0)
+  }
+
+  end():Point {
+    assert(this.points.length > 0, "Empty path")
+    return this.points[this.points.length-1]
+  }
+
+  copy():Path {
+    return new Path(this.points)
+  }
+
+  plus(p:Point):Path {
+    let result = this.copy()
+    result.points.push(p)
+    return result
+  }
+
+  at(idx:number):Point {
+    assert(idx >= 0 && idx < this.points.length, "Index out of bounds")
+    return this.points[idx]
+  }
+
+  static Empty = new Path([])
 }
 
 class Tag {
@@ -38,22 +72,33 @@ class TaggedString {
   }
 
   static make(text:string, tag:Tag):TaggedString {
-    let tcs:TaggedChar[]
-    for (let i = 0; 0 <= text.length; i++) {
+    let tcs:TaggedChar[] = []
+    for (let i = 0; i <= text.length; i++) {
       tcs.push(new TaggedChar(text[i], tag))
     }
     return new TaggedString(tcs)
   }
+
+  at(offset:number):TaggedChar {
+    assert(offset >= 0 && offset < this.length, "Offset out of bounds " + offset)
+    return this.text[offset]
+  }
 }
 
 class MyersState {
-  path:Line[] = []
+  pathCollection:Path[] = []
+  path:Path = Path.Empty
   candidates:Line[] = []
   highlights:Line[] = []
+  topLevel:boolean = true
   diagonal:number
 
   constructor(diagonal:number) {
     this.diagonal = diagonal
+  }
+
+  static EmptyState() {
+    return new MyersState(0)
   }
 }
 
@@ -75,20 +120,19 @@ class MyersContext {
 
   // Single directional myers diff algorithm
   unidir() {
-    let endpoints:number[] = []
-    endpoints[1] = 0
+    const tthis = this // workaround https://github.com/Microsoft/TypeScript/issues/6021
+    let endpoints:Path[] = []
+    endpoints[1] = new Path([{x:0, y:0}])
 
-    let topLen = this.top.length
-    let downLen = this.left.length
+    let topLen = tthis.top.length
+    let downLen = tthis.left.length
     let MAX = topLen + downLen
     let done = false
-
-    let path:Line[] = []
 
     for (let step=0; step <= MAX && ! done; step++) {
       for (let diagonal = -step; diagonal <= step; diagonal+=2) {
 
-        function getLine(x:number, down:boolean):Line {
+        let getLine = (where:Point, down:boolean):Line => {
           // if down is true, we are starting from the diagonal above us, which is larger
           // if down is false, we are starting from the diagonal to our left, which is smaller
           let otherDiagonal = diagonal + (down ? 1 : -1)
@@ -101,30 +145,37 @@ class MyersContext {
 
         // Whether we traverse down (y+1) or right (x+1)
         let goDown: boolean
+        let bestPath: Path
 
         let candidateLines:Line[] = []
         if (diagonal == -step) {
-            let topX = endpoints[diagonal+1]
+            let top = endpoints[diagonal+1]
             goDown = true
-            candidateLines.push(getLine(topX, goDown))
+            bestPath = top
+            candidateLines.push(getLine(top.end(), goDown))
         } else if (diagonal == step) {
-            let leftX = endpoints[diagonal-1]
+            let left = endpoints[diagonal-1]
             goDown = false
-            candidateLines.push(getLine(leftX + 1, goDown))
+            bestPath = left
+            candidateLines.push(getLine(moved(left.end(), 1), goDown))
         } else {
-            let leftX = endpoints[diagonal-1], topX = endpoints[diagonal+1]
-            goDown = leftX < topX
-            candidateLines.push(getLine(leftX, true), getLine(leftX + 1, false))
+            let left = endpoints[diagonal-1], top = endpoints[diagonal+1]
+            goDown = left.end().x < top.end().x
+            bestPath = goDown ? top : left
+            candidateLines.push(getLine(top.end(), true), getLine(moved(left.end(), 1), false))
         }
 
         // go down or right
-        let x:number = goDown ? endpoints[diagonal + 1] : endpoints[diagonal - 1] + 1
+        let x:number = goDown ? endpoints[diagonal + 1].end().x : endpoints[diagonal - 1].end().x + 1
         let y:number = x - diagonal
+
+        assert(isFinite(x) && isFinite(y), "Internal error: non-finite values " + x + " / " + y)
+        assert(x >= 0 && y >= 0, "Internal error: negative values " + x + " / " + y)
 
         // Skip cases that go off the grid
         // Note we check >, not >=, because we have a terminating dots at x == top_len / y == down_len
         if (x > topLen || y > downLen) {
-            endpoints[diagonal] = x
+            endpoints[diagonal] = bestPath.plus({x:x, y:y})
             continue
         }
 
@@ -133,14 +184,18 @@ class MyersContext {
         let highlightLines:Line[] = []
         highlightLines.push(Line.make(x - (goDown ? 0 : 1), y - (goDown ? 1 : 0), x, y))
 
-        let state = this.pushState(diagonal)
-        state.path = path.slice(0)
+        var cursorPath = bestPath.plus({x:x, y:y})
+
+        let state = tthis.pushState(diagonal)
+        state.pathCollection = endpoints.slice(0)
+        state.path = cursorPath
         state.candidates = candidateLines
         state.highlights = highlightLines
 
         // Traverse the snake
-        while (x < topLen && y < downLen && this.top[x].char == this.left[y].char) {
+        while (x < topLen && y < downLen && tthis.top.at(x).char == tthis.left.at(y).char) {
             x++, y++
+            cursorPath = cursorPath.plus({x:x, y:y})
             // copy and update our tagged string
             // the character at index y-1 in our string is now shared
             // new_tagged_string = new_tagged_string.slice(0)
@@ -149,17 +204,22 @@ class MyersContext {
             // new_tagged_string[idx] = new_tagged_string[idx].retag(TAG_DOWN | TAG_TOP | TAG_RECENT)
             //
             highlightLines = highlightLines.concat([Line.make(x-1, y-1, x, y)])
-            let state = this.pushState(diagonal)
-            state.path = path.slice(0)
+            let state = tthis.pushState(diagonal)
+            state.pathCollection = endpoints.slice(0)
+            state.path = cursorPath
             state.candidates = candidateLines
             state.highlights = highlightLines
-
-            endpoints[diagonal] = x
+            state.topLevel = false
 
             if (x >= topLen && y >= downLen) {
                 done = true
                 break
             }
+        }
+        endpoints[diagonal] = cursorPath
+        if (x >= topLen && y >= downLen) {
+            done = true
+            break
         }
       }
     }
@@ -172,6 +232,7 @@ class MyersInput {
 
 function MyersUnidir(input:MyersInput) : MyersState[] {
   let ctx = new MyersContext(input.left, input.top)
+  console.log("ctx: " + ctx)
   ctx.unidir()
   return ctx.output
 }

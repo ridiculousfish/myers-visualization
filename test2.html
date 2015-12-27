@@ -57,13 +57,16 @@
 
 </div>
 
+<script type="text/javascript" src="myers_events.js"></script>
 <script type="text/javascript" src="myers_ui.js"></script>
 <script type="text/javascript" src="myers_state.js"></script>
 
 <script type="text/javascript">
 var ids = new MyersIDs('#myers', '#slider', '#intermediate_diff', '#text1', '#text2')
 var input = new MyersInput('ICECREAM', 'CERAMIC')
-var ui = new MyersUI(ids, input)
+var ui = new MyersUI(ids)
+var states = MyersUnidir(input)
+ui.resetWithInput(input, states)
 console.log(ui)
 </script>
 
