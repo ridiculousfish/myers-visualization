@@ -1,3 +1,4 @@
+/// <reference path='./collections.ts'/>
 /// <reference path='./myers_state.ts'/>
 /// <reference path='./snapsvg.d.ts'/>
 /// <reference path='./jquery.d.ts'/>
@@ -103,32 +104,53 @@ function eheight(svg:Snap.Element):number {
 class MyersStateVisualization {
   svg:Paper
   grid: MyersGrid
+  diagonal:Snap.Element
+
+  allPathGroup:Snap.Element
+  mainPathGroup:Snap.Element
 
   constructor(svg:Paper, grid:MyersGrid) {
     this.svg = svg
     this.grid = grid
+
+    let diagonalAttr = { stroke: "#FFFF00", 'strokeWidth': 5.5, opacity:.5, strokeLinecap:"round"}
+    this.diagonal = this.svg.line(0, 0, 0, 0).attr(diagonalAttr)
+
+    this.allPathGroup = this.svg.group()
+    this.mainPathGroup = this.svg.group()
   }
 
   setState(state:MyersState) {
-    this.svg.clear()
-    this.addDiagonal(state.diagonal)
-    let uniquer : { [key:string]:boolean; } = {};
+    //this.svg.clear()
+    this.setDiagonal(state.diagonal)
+
+    let allComps = new StringSet()
+    let newAllPathGroup = this.svg.group()
     for (let idx of pathIndexes(state.pathCollection)) {
       let path = state.pathCollection[idx]
-      this.addPath(path, uniquer).attr({opacity: .33})
+      this.addPath(path, allComps, newAllPathGroup).attr({opacity: .33})
     }
-    this.addPath(state.path, {})
+
+    let mainComps = new StringSet()
+    let newMainPathGroup = this.svg.group()
+    this.addPath(state.path, mainComps, newMainPathGroup)
+
+    this.allPathGroup.remove()
+    this.allPathGroup = newAllPathGroup
+
+    this.mainPathGroup.remove()
+    this.mainPathGroup = newMainPathGroup
   }
 
-  addPath(path:Path, uniquer:{ [key:string]:boolean; }):Snap.Element {
+  addPath(path:Path, uniquer:StringSet, group:any /* Snap.Group */):Snap.Element {
     let tthis = this
     let cpointCoords : number[] = []
     var lastCPoint : Point = undefined
     let addPoint = function(p:Point) {
       let cpoint = tthis.grid.pointForLocation(new GridLocation(p.x, p.y))
       let key = p.x + "," + p.y
-      if (!uniquer[key]) {
-        uniquer[key] = true
+      if (!uniquer.contains(key)) {
+        uniquer.add(key)
         // hack!
         if (lastCPoint && cpointCoords.length == 0) {
           cpointCoords.push(lastCPoint.x, lastCPoint.y)
@@ -151,12 +173,11 @@ class MyersStateVisualization {
       strokeLinejoin:"round",
       fill:'none'}
     let cline = this.svg.polyline(cpointCoords).attr(lineAttr)
+    group.add(cline)
     return cline
   }
 
-  addDiagonal(diagonal:number) {
-    let diagonalAttr = { stroke: "#FFFF00", 'strokeWidth': 5.5, opacity:.5, strokeLinecap:"round"}
-
+  setDiagonal(diagonal:number) {
     let startX = diagonal >= 0 ? diagonal : 0
     let startY = diagonal <= 0 ? -diagonal : 0
 
@@ -171,8 +192,8 @@ class MyersStateVisualization {
     let startPoint = this.grid.pointForLocation(new GridLocation(startX, startY))
     let endPoint = this.grid.pointForLocation(new GridLocation(endX, endY))
 
-    let line = this.svg.line(startPoint.x, startPoint.y, endPoint.x, endPoint.y)
-    line.attr(diagonalAttr)
+    this.diagonal.attr({x1:startPoint.x, y1:startPoint.y, x2:endPoint.x, y2:endPoint.y})
+
   }
 
 

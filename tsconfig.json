@@ -20,6 +20,7 @@
         "!node_modules/**"
     ],
     "files": [
+        "collections.ts",
         "jquery.d.ts",
         "myers_events.ts",
         "myers_state.ts",
