@@ -101,10 +101,52 @@ function eheight(svg:Snap.Element):number {
   return result
 }
 
+/* Maintains a list of SVG lines corresponding to a list of paths */
+class PathSet {
+  components = new Dictionary<Snap.Element>()
+
+  setPaths(pathList:Path[], elementFactory:(line:Line, isLast:boolean) => Snap.Element) {
+    let lines = new Dictionary<Line>()
+    for (let path of pathList) {
+      let currentPoint:Point = {x:0, y:-1}
+      for (let i=0; i < path.points.length; i++) {
+        let newPoint = path.at(i)
+        let line = new Line(currentPoint, newPoint)
+        let compKey = currentPoint.x + "," + currentPoint.y + " - " + newPoint.x + "," + newPoint.y
+        lines.add(compKey, line)
+        currentPoint = newPoint
+      }
+    }
+
+    let existingKeys = this.components.keys()
+    let newKeys = lines.keys()
+
+    // Remove elements from components no longer present
+    let keysToRemove = setDifference(existingKeys, newKeys)
+    for (let keyToRemove of keysToRemove) {
+      this.components[keyToRemove].remove()
+      this.components.remove(keyToRemove)
+    }
+
+    // Add elements from allPathComponents now in path
+    let keysToAdd = setDifference(newKeys, existingKeys)
+    for (let i=0; i < keysToAdd.length; i++) {
+      let key = keysToAdd[i]
+      let isLast = (i + 1 == keysToAdd.length)
+      let elem = elementFactory(lines[key], isLast)
+      this.components.add(key, elem)
+    }
+
+  }
+}
+
 class MyersStateVisualization {
   svg:Paper
   grid: MyersGrid
   diagonal:Snap.Element
+
+  allPaths = new PathSet()
+  mainPath = new PathSet()
 
   allPathGroup:Snap.Element
   mainPathGroup:Snap.Element
@@ -120,60 +162,36 @@ class MyersStateVisualization {
     this.mainPathGroup = this.svg.group()
   }
 
-  setState(state:MyersState) {
+  setState(state:MyersState, animate:boolean = false) {
     //this.svg.clear()
     this.setDiagonal(state.diagonal)
 
-    let allComps = new StringSet()
-    let newAllPathGroup = this.svg.group()
-    for (let idx of pathIndexes(state.pathCollection)) {
-      let path = state.pathCollection[idx]
-      this.addPath(path, allComps, newAllPathGroup).attr({opacity: .33})
-    }
+    this.allPaths.setPaths(pathValues(state.pathCollection),
+      (line:Line, isLast:boolean) => {
+        return this.addPathLine(line, .5)
+      })
 
-    let mainComps = new StringSet()
-    let newMainPathGroup = this.svg.group()
-    this.addPath(state.path, mainComps, newMainPathGroup)
-
-    this.allPathGroup.remove()
-    this.allPathGroup = newAllPathGroup
-
-    this.mainPathGroup.remove()
-    this.mainPathGroup = newMainPathGroup
+    this.mainPath.setPaths([state.path],
+      (line:Line, isLast:boolean) => {
+        let animate = isLast
+        return this.addPathLine(line, 1.0, animate)
+      })
   }
 
-  addPath(path:Path, uniquer:StringSet, group:any /* Snap.Group */):Snap.Element {
-    let tthis = this
-    let cpointCoords : number[] = []
-    var lastCPoint : Point = undefined
-    let addPoint = function(p:Point) {
-      let cpoint = tthis.grid.pointForLocation(new GridLocation(p.x, p.y))
-      let key = p.x + "," + p.y
-      if (!uniquer.contains(key)) {
-        uniquer.add(key)
-        // hack!
-        if (lastCPoint && cpointCoords.length == 0) {
-          cpointCoords.push(lastCPoint.x, lastCPoint.y)
-        }
-        cpointCoords.push(cpoint.x, cpoint.y)
-      }
-      lastCPoint = cpoint
-    }
-
-    // hack!
-    addPoint({x:0, y:-1})
-    for (let i=0; i < path.points.length; i++) {
-      addPoint(path.at(i))
-    }
+  // Adds a line corresponding to the given Line
+  addPathLine(line:Line, opacity:number, animate:boolean = false):Snap.Element {
+    let start = this.grid.pointForLocation(line.start.x, line.start.y)
+    let end = this.grid.pointForLocation(line.end.x, line.end.y)
     let lineAttr = {
       stroke: "#0000FF",
       strokeWidth: 3.5,
-      opacity:1,
-//      strokeLinecap:"round",
-      strokeLinejoin:"round",
+      opacity:opacity,
       fill:'none'}
-    let cline = this.svg.polyline(cpointCoords).attr(lineAttr)
-    group.add(cline)
+    let initialEnd = animate ? start : end
+    let cline = this.svg.line(start.x, start.y, initialEnd.x, initialEnd.y).attr(lineAttr)
+    if (animate) {
+      cline.animate({x2:end.x, y2:end.y}, .5 * 1000)
+    }
     return cline
   }
 
@@ -189,11 +207,10 @@ class MyersStateVisualization {
       endY++
     }
 
-    let startPoint = this.grid.pointForLocation(new GridLocation(startX, startY))
-    let endPoint = this.grid.pointForLocation(new GridLocation(endX, endY))
+    let startPoint = this.grid.pointForLocation(startX, startY)
+    let endPoint = this.grid.pointForLocation(endX, endY)
 
     this.diagonal.attr({x1:startPoint.x, y1:startPoint.y, x2:endPoint.x, y2:endPoint.y})
-
   }
 
 
@@ -266,8 +283,8 @@ class MyersGrid {
     }
   }
 
-  pointForLocation(gl:GridLocation):CPoint {
-    return new CPoint(this.xPadding + this.xSpacing * gl.x, this.yPadding + this.ySpacing * gl.y)
+  pointForLocation(columnX:number, rowY:number):CPoint {
+    return new CPoint(this.xPadding + this.xSpacing * columnX, this.yPadding + this.ySpacing * rowY)
   }
 
   addStrokes(c:Cursor):Snap.Element {
@@ -283,12 +300,12 @@ class MyersGrid {
     let attrs = { stroke: this.gridColor, 'strokeWidth': 0.5}
     // horizontal lines
     for (let r=0; r<this.rows; r++) {
-      let y = this.pointForLocation(new GridLocation(0, r)).y
+      let y = this.pointForLocation(0, r).y
       this.svg.line(0, y, this.width, y).attr(attrs)
     }
     // vertical lines
     for (let c=0; c < this.cols; c++) {
-      let x = this.pointForLocation(new GridLocation(c, 0)).x
+      let x = this.pointForLocation(c, 0).x
       this.svg.line(x, 0, x, this.height).attr(attrs)
     }
   }
@@ -300,7 +317,7 @@ class MyersGrid {
     let fillAttrs = { stroke: 'none', fill: this.fillColor}
     let strokeAttrs = { fill: 'none', stroke: 'black', 'strokeWidth': 1.25}
     let centerFraction = .7
-    let centerPoint = this.pointForLocation(center)
+    let centerPoint = this.pointForLocation(center.x, center.y)
     let rx = this.xSpacing * centerFraction/2.0
     let ry = this.ySpacing * centerFraction/2.0
 
@@ -375,12 +392,12 @@ class MyersGrid {
   }
 
   makeSnake(centerGL:GridLocation)  {
-    let center = this.pointForLocation(centerGL)
+    let center = this.pointForLocation(centerGL.x, centerGL.y)
     let rectFraction = .3
     let rectThickness = rectFraction * (this.xSpacing + this.ySpacing) / 2.0
 
     let start = center
-    let target = this.pointForLocation(centerGL.offset(1, 1))
+    let target = this.pointForLocation(centerGL.x + 1, centerGL.y+1)
     let distance = hypot(target.x - start.x, target.y - start.y)
 
     // rotate a rectangle centered at the origin
@@ -449,6 +466,11 @@ class MyersUI {
   states:MyersState[] = []
   topLevelStateIndexes:number[]
 
+  // Metrics
+  labelXOffset = -15
+  labelYOffset = -12
+  labelFontSize = 20
+
   constructor(ids:MyersIDs) {
     this.ids = ids
     this.events = new MyersEvents(ids)
@@ -479,7 +501,7 @@ class MyersUI {
   timerGo() {
     let newIdx = this.stateIndex + 1
     if (newIdx < this.states.length) {
-      this.setStateIndex(newIdx)
+      this.setStateIndex(newIdx, true)
 
       // Find the number of top level states at or before newIdx
       var topLevelCount = 0;
@@ -503,10 +525,48 @@ class MyersUI {
     this.startTimer()
   }
 
-  setStateIndex(idx:number) {
+  setStateIndex(idx:number, animate:boolean = false) {
     assert(idx >= 0 && idx < this.states.length, "Bad state index")
-    this.stateVisualization.setState(this.states[idx])
+    this.stateVisualization.setState(this.states[idx], animate)
     this.stateIndex = idx
+  }
+
+  makeLabel(isVertical:boolean, row:number, column:number, text:string) {
+    let offset = this.grid.pointForLocation(column, row)
+    // Need unary + to convert to force conversion to number
+    // because this is JavaScript
+    let x = +this.grid.svg.attr("x") + offset.x
+    let y = +this.grid.svg.attr("y") + offset.y
+    // X and Y are the positions of the center of the text
+    // For vertical, we subtract half of the xSpacing to bring us to the left edge
+    // and then add half of the ySpacing to center us vertically
+    // Similarly for horizontal
+    if (isVertical) {
+      x += this.labelXOffset - this.grid.xSpacing / 2
+      y += this.grid.ySpacing / 2
+    } else {
+      y += this.labelYOffset - this.grid.ySpacing / 2
+      x += this.grid.xSpacing / 2
+    }
+    let textObj = this.svg.text(0, 0, text)
+
+    // The textObj x and y are of its baseline
+    // To center it vertically, center y, and then add baselineOffsetFromCenter
+    let bbox:any = textObj.getBBox()
+    let baselineOffsetFromCenter = bbox.cy // is negative
+    textObj.attr({
+      x: x,
+      y: y - baselineOffsetFromCenter,
+      fontFamily:"Times New Roman",
+      fontSize: this.labelFontSize + "px",
+      textAnchor: "middle"
+    })
+
+    // this.svg.circle(x, y, 2)
+    // bbox = textObj.getBBox()
+    // this.svg.rect(bbox.x, bbox.y, bbox.width, bbox.height).attr({stroke: "#FFFF00", 'strokeWidth': 1, fill:"none"})
+
+    return textObj
   }
 
   resetWithInput(input:MyersInput, states:MyersState[]) {
@@ -525,16 +585,29 @@ class MyersUI {
       }
     }
 
-    let gridSvg = Snap(380, 380)
-    this.grid = new MyersGrid(gridSvg, this.input)
-    this.svg.append(gridSvg)
+    let offsets = {x:30, y:30}
 
-    let visualizationSvg = Snap(380, 380)
+    // Create the grid
+    let gridSvg = Snap(380, 380).attr(offsets)
+    this.grid = new MyersGrid(gridSvg, this.input)
+    this.svg.append(gridSvg.attr(offsets))
+
+    // Create the labels
+    for (let x=0; x < this.input.top.length; x++) {
+      this.makeLabel(false, 0, x, this.input.top[x])
+    }
+    for (let y=0; y < this.input.left.length; y++) {
+      this.makeLabel(true, y, 0, this.input.left[y])
+    }
+
+    // Create the dynamic visualization
+    let visualizationSvg = Snap(380, 380).attr(offsets)
     this.stateVisualization = new MyersStateVisualization(visualizationSvg, this.grid)
     this.svg.append(visualizationSvg)
 
     assert(this.states.length > 0, "Internal error: should not have empty state")
 
+    // Configure the slider
     let jslider = $(this.ids.slider)
     let slider = <HTMLInputElement>jslider[0]
     slider.min = "0"

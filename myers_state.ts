@@ -71,6 +71,16 @@ function pathIndexes(paths:Path[]): number[] {
       result.push(k)
     }
   }
+  result.sort(function(a, b) { return a-b; })
+  return result
+}
+
+// Accounts for negative indices
+function pathValues(paths:Path[]) : Path[] {
+  let result : Path[] = []
+  for (var idx of pathIndexes(paths)) {
+    result.push(paths[idx])
+  }
   return result
 }
 
