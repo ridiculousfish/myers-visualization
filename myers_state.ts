@@ -85,12 +85,8 @@ function pathValues(paths:Path[]) : Path[] {
 }
 
 class Tag {
-  constructor(top:boolean, down:boolean) {}
-  down:boolean = false
-  top:boolean = false
-
-  static Top = new Tag(true, false)
-  static Down = new Tag(false, true)
+  recent:boolean = false
+  constructor(public top:boolean, public down:boolean, public deleted:boolean) {}
 }
 
 class TaggedChar {
@@ -98,7 +94,7 @@ class TaggedChar {
 }
 
 class TaggedString {
-  public length:number
+  length:number
   constructor(public text:TaggedChar[]) {
     this.length = text.length
   }
@@ -120,6 +116,7 @@ class TaggedString {
 class MyersState {
   pathCollection:Path[] = []
   path:Path = Path.Empty
+  text:TaggedString = new TaggedString([])
   candidates:Line[] = []
   highlights:Line[] = []
   topLevel:boolean = true
@@ -136,12 +133,22 @@ class MyersState {
 
 class MyersContext {
   public output:MyersState[] = []
-  private left:TaggedString
-  private top:TaggedString
+  private left:string
+  private top:string
 
   constructor(left:string, top:string) {
-    this.left = TaggedString.make(left, Tag.Down)
-    this.top = TaggedString.make(top, Tag.Top)
+    this.left = left
+    this.top = top
+  }
+
+  leftAt(idx:number) {
+    assert(idx >= 0 && idx < this.left.length, "Left index " + idx + " out of bounds")
+    return this.left[idx]
+  }
+
+  topAt(idx:number) {
+    assert(idx >= 0 && idx < this.top.length, "Top index " + idx + " out of bounds")
+    return this.top[idx]
   }
 
   pushState(diagonal:number):MyersState {
@@ -154,7 +161,7 @@ class MyersContext {
   trim1Path(path:Path): Path {
     let result = Path.Empty.copy()
     for (let point of path.points) {
-      if (point.x < this.top.length && point.y < this.left.length) {
+      if (point.x <= this.top.length && point.y <= this.left.length) {
         result.points.push(point)
       }
     }
@@ -167,6 +174,32 @@ class MyersContext {
       result[idx] = this.trim1Path(paths[idx])
     }
     return result
+  }
+
+  taggedStringForPath(path:Path):TaggedString {
+    if (path.points.length < 2) {
+      return new TaggedString([])
+    }
+    let tchars : TaggedChar[] = []
+    // Skip the point at idx 0, since that doesn't correspond to a character
+    let last = path.points[1]
+    let idx = 2
+    for (; idx < path.points.length; idx++) {
+      let current = path.points[idx]
+      assert(current.x > last.x || current.y > last.y, "Corrupt path")
+      let goesRight = current.x > last.x, goesDown = current.y > last.y
+      let deleted = goesDown && !goesRight
+      let tag = new Tag(goesRight, goesDown, deleted)
+      let char = goesRight ? this.topAt(last.x) : this.leftAt(last.y)
+      tchars.push(new TaggedChar(char, tag))
+      last = current
+    }
+    // everything remaining is from the old string
+    let remainingTag = new Tag(false, true, false)
+    for (let y = last.y; y < this.left.length; y++) {
+      tchars.push(new TaggedChar(this.leftAt(y), remainingTag))
+    }
+    return new TaggedString(tchars)
   }
 
 
@@ -224,9 +257,11 @@ class MyersContext {
         assert(isFinite(x) && isFinite(y), "Internal error: non-finite values " + x + " / " + y)
         assert(x >= 0 && y >= 0, "Internal error: negative values " + x + " / " + y)
 
+        var cursorPath = bestPath.plus({x:x, y:y})
+
         // Skip cases that go off the grid
-        // Note we check >, not >=, because we have a terminating dots at x == top_len / y == down_len
         if (x > topLen || y > downLen) {
+            endpoints[diagonal] = cursorPath
             continue
         }
 
@@ -235,16 +270,18 @@ class MyersContext {
         let highlightLines:Line[] = []
         highlightLines.push(Line.make(x - (goDown ? 0 : 1), y - (goDown ? 1 : 0), x, y))
 
-        var cursorPath = bestPath.plus({x:x, y:y})
-
         let state = tthis.pushState(diagonal)
         state.pathCollection = tthis.trimPaths(endpoints)
         state.path = tthis.trim1Path(cursorPath)
+        state.text = tthis.taggedStringForPath(state.path)
         state.candidates = candidateLines
         state.highlights = highlightLines
 
         // Traverse the snake
-        while (x < topLen && y < downLen && tthis.top.at(x).char == tthis.left.at(y).char) {
+        while (x < topLen && y < downLen && tthis.topAt(x) == tthis.leftAt(y)) {
+          if (diagonal == -3) {
+            console.log("Here: " + x + " ," + y)
+          }
             x++, y++
             cursorPath = cursorPath.plus({x:x, y:y})
             // copy and update our tagged string
@@ -258,6 +295,7 @@ class MyersContext {
             let state = tthis.pushState(diagonal)
             state.pathCollection = tthis.trimPaths(endpoints)
             state.path = tthis.trim1Path(cursorPath)
+            state.text = tthis.taggedStringForPath(state.path)
             state.candidates = candidateLines
             state.highlights = highlightLines
             state.topLevel = false
@@ -283,7 +321,6 @@ class MyersInput {
 
 function MyersUnidir(input:MyersInput) : MyersState[] {
   let ctx = new MyersContext(input.left, input.top)
-  console.log("ctx: " + ctx)
   ctx.unidir()
   return ctx.output
 }

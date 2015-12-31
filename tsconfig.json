@@ -24,7 +24,9 @@
         "jquery.d.ts",
         "myers_events.ts",
         "myers_state.ts",
+        "myers_tagged_string_visualization.ts",
         "myers_ui.ts",
+        "myers_visualization.ts",
         "snapsvg.d.ts"
     ],
     "atom": {
