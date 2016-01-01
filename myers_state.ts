@@ -136,6 +136,8 @@ class MyersContext {
   private left:string
   private top:string
 
+  endpoints:Path[] = []
+
   constructor(left:string, top:string) {
     this.left = left
     this.top = top
@@ -202,114 +204,116 @@ class MyersContext {
     return new TaggedString(tchars)
   }
 
-
-  // Single directional myers diff algorithm
-  unidir() {
+  extend1Diagonal(step:number, diagonal:number) {
     const tthis = this // workaround https://github.com/Microsoft/TypeScript/issues/6021
-    let endpoints:Path[] = []
-    endpoints[1] = new Path([{x:0, y:-1}])
 
     let topLen = tthis.top.length
     let downLen = tthis.left.length
-    let MAX = topLen + downLen
-    let done = false
 
-    for (let step=0; step <= MAX && ! done; step++) {
-      for (let diagonal = -step; diagonal <= step; diagonal+=2) {
+    let endpoints = this.endpoints // alias to avoid typing 'this'
+    let getLine = (where:Point, down:boolean):Line => {
+      // if down is true, we are starting from the diagonal above us, which is larger
+      // if down is false, we are starting from the diagonal to our left, which is smaller
+      let otherDiagonal = diagonal + (down ? 1 : -1)
+      let startX = x - (down ? 0 : 1)
+      let startY = startX - otherDiagonal
+      let start = {x:startX, y:startY}
+      let end = {x:startX + (down ? 0 : 1), y:startY + (down ? 1 : 0)}
+      return new Line(start, end)
+    }
 
-        let getLine = (where:Point, down:boolean):Line => {
-          // if down is true, we are starting from the diagonal above us, which is larger
-          // if down is false, we are starting from the diagonal to our left, which is smaller
-          let otherDiagonal = diagonal + (down ? 1 : -1)
-          let startX = x - (down ? 0 : 1)
-          let startY = startX - otherDiagonal
-          let start = {x:startX, y:startY}
-          let end = {x:startX + (down ? 0 : 1), y:startY + (down ? 1 : 0)}
-          return new Line(start, end)
-        }
+    // Whether we traverse down (y+1) or right (x+1)
+    let goDown: boolean
+    let bestPath: Path
 
-        // Whether we traverse down (y+1) or right (x+1)
-        let goDown: boolean
-        let bestPath: Path
+    let candidateLines:Line[] = []
+    if (diagonal == -step) {
+        let top = endpoints[diagonal+1]
+        goDown = true
+        bestPath = top
+        candidateLines.push(getLine(top.end(), goDown))
+    } else if (diagonal == step) {
+        let left = endpoints[diagonal-1]
+        goDown = false
+        bestPath = left
+        candidateLines.push(getLine(moved(left.end(), 1), goDown))
+    } else {
+        let left = endpoints[diagonal-1], top = endpoints[diagonal+1]
+        goDown = left.end().x < top.end().x
+        bestPath = goDown ? top : left
+        candidateLines.push(getLine(top.end(), true), getLine(moved(left.end(), 1), false))
+    }
 
-        let candidateLines:Line[] = []
-        if (diagonal == -step) {
-            let top = endpoints[diagonal+1]
-            goDown = true
-            bestPath = top
-            candidateLines.push(getLine(top.end(), goDown))
-        } else if (diagonal == step) {
-            let left = endpoints[diagonal-1]
-            goDown = false
-            bestPath = left
-            candidateLines.push(getLine(moved(left.end(), 1), goDown))
-        } else {
-            let left = endpoints[diagonal-1], top = endpoints[diagonal+1]
-            goDown = left.end().x < top.end().x
-            bestPath = goDown ? top : left
-            candidateLines.push(getLine(top.end(), true), getLine(moved(left.end(), 1), false))
-        }
+    // go down or right
+    let x:number = goDown ? endpoints[diagonal + 1].end().x : endpoints[diagonal - 1].end().x + 1
+    let y:number = x - diagonal
 
-        // go down or right
-        let x:number = goDown ? endpoints[diagonal + 1].end().x : endpoints[diagonal - 1].end().x + 1
-        let y:number = x - diagonal
+    assert(isFinite(x) && isFinite(y), "Internal error: non-finite values " + x + " / " + y)
+    assert(x >= 0 && y >= 0, "Internal error: negative values " + x + " / " + y)
 
-        assert(isFinite(x) && isFinite(y), "Internal error: non-finite values " + x + " / " + y)
-        assert(x >= 0 && y >= 0, "Internal error: negative values " + x + " / " + y)
+    var cursorPath = bestPath.plus({x:x, y:y})
 
-        var cursorPath = bestPath.plus({x:x, y:y})
+    // Skip cases that go off the grid
+    if (x > topLen || y > downLen) {
+        endpoints[diagonal] = cursorPath
+        return false
+    }
 
-        // Skip cases that go off the grid
-        if (x > topLen || y > downLen) {
-            endpoints[diagonal] = cursorPath
-            continue
-        }
+    // TODO: update tagged string
 
-        // TODO: update tagged string
+    let highlightLines:Line[] = []
+    highlightLines.push(Line.make(x - (goDown ? 0 : 1), y - (goDown ? 1 : 0), x, y))
 
-        let highlightLines:Line[] = []
-        highlightLines.push(Line.make(x - (goDown ? 0 : 1), y - (goDown ? 1 : 0), x, y))
+    let state = tthis.pushState(diagonal)
+    state.pathCollection = tthis.trimPaths(endpoints)
+    state.path = tthis.trim1Path(cursorPath)
+    state.text = tthis.taggedStringForPath(state.path)
+    state.candidates = candidateLines
+    state.highlights = highlightLines
 
+    // Traverse the snake
+    while (x < topLen && y < downLen && tthis.topAt(x) == tthis.leftAt(y)) {
+      if (diagonal == -3) {
+        console.log("Here: " + x + " ," + y)
+      }
+        x++, y++
+        cursorPath = cursorPath.plus({x:x, y:y})
+        // copy and update our tagged string
+        // the character at index y-1 in our string is now shared
+        // new_tagged_string = new_tagged_string.slice(0)
+        // remove_tag(new_tagged_string, TAG_RECENT)
+        // let idx = new_tagged_string.indexOf(down_tagged_string[y-1])
+        // new_tagged_string[idx] = new_tagged_string[idx].retag(TAG_DOWN | TAG_TOP | TAG_RECENT)
+        //
+        highlightLines = highlightLines.concat([Line.make(x-1, y-1, x, y)])
         let state = tthis.pushState(diagonal)
         state.pathCollection = tthis.trimPaths(endpoints)
         state.path = tthis.trim1Path(cursorPath)
         state.text = tthis.taggedStringForPath(state.path)
         state.candidates = candidateLines
         state.highlights = highlightLines
+        state.topLevel = false
 
-        // Traverse the snake
-        while (x < topLen && y < downLen && tthis.topAt(x) == tthis.leftAt(y)) {
-          if (diagonal == -3) {
-            console.log("Here: " + x + " ," + y)
-          }
-            x++, y++
-            cursorPath = cursorPath.plus({x:x, y:y})
-            // copy and update our tagged string
-            // the character at index y-1 in our string is now shared
-            // new_tagged_string = new_tagged_string.slice(0)
-            // remove_tag(new_tagged_string, TAG_RECENT)
-            // let idx = new_tagged_string.indexOf(down_tagged_string[y-1])
-            // new_tagged_string[idx] = new_tagged_string[idx].retag(TAG_DOWN | TAG_TOP | TAG_RECENT)
-            //
-            highlightLines = highlightLines.concat([Line.make(x-1, y-1, x, y)])
-            let state = tthis.pushState(diagonal)
-            state.pathCollection = tthis.trimPaths(endpoints)
-            state.path = tthis.trim1Path(cursorPath)
-            state.text = tthis.taggedStringForPath(state.path)
-            state.candidates = candidateLines
-            state.highlights = highlightLines
-            state.topLevel = false
-
-            if (x >= topLen && y >= downLen) {
-                done = true
-                break
-            }
-        }
-        endpoints[diagonal] = cursorPath
         if (x >= topLen && y >= downLen) {
-            done = true
             break
         }
+    }
+    endpoints[diagonal] = cursorPath
+    return x >= topLen && y >= downLen // whether we're done
+  }
+
+  // Single directional myers diff algorithm
+  unidir() {
+    const tthis = this // workaround https://github.com/Microsoft/TypeScript/issues/6021
+    let endpoints = this.endpoints // alias to avoid having to write 'this'
+    endpoints[1] = new Path([{x:0, y:-1}])
+
+    // maximum number of steps required to find the shortest script
+    const MAX = tthis.top.length + tthis.left.length
+    let done = false
+    for (let step=0; step <= MAX && ! done; step++) {
+      for (let diagonal = -step; diagonal <= step && ! done; diagonal+=2) {
+        done = this.extend1Diagonal(step, diagonal)
       }
     }
   }
