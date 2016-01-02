@@ -29,6 +29,11 @@ class Path {
     this.points = points.slice(0)
   }
 
+  start():Point {
+    assert(this.points.length > 0, "Empty path")
+    return this.points[0]
+  }
+
   end():Point {
     assert(this.points.length > 0, "Empty path")
     return this.points[this.points.length-1]
@@ -76,6 +81,10 @@ class Path {
       }
     }
     return new Path(this.points.slice(idx+1))
+  }
+
+  pathByMappingPoints(mapper: (p:Point)=>Point):Path {
+    return new Path(this.points.map(mapper))
   }
 }
 
@@ -131,7 +140,7 @@ class TaggedString {
 }
 
 interface Snake {
-  length:number,
+  editScriptLength:number,
   path:Path
 }
 
@@ -148,6 +157,37 @@ class MyersState {
   constructor(diagonal:number) {
     this.diagonal = diagonal
   }
+
+  // Transform a state into a new state by translating and optionally flipping its points
+  // stateByTransformingPoints(translate:Point, flipAt:Point?) : MyersState {
+  //   const doFlip = (flipAt != undefined)
+  //   function mapPoint(p:Point):Point {
+  //     let result:Point = {x:p.x, y:p.y}
+  //     if (doFlip) {
+  //       result.x = flipAt.x - result.x
+  //       result.y = flipAt.y - result.y
+  //     }
+  //     result.x += translate.x
+  //     result.y += translate.y
+  //     return result
+  //   }
+  //
+  //   // determine new diagonal
+  //   let transformedDiagonal = this.diagonal
+  //   if (doFlip) {
+  //     transformedDiagonal = flipAt.x - flipAt.y - transformedDiagonal
+  //   }
+  //
+  //   let result = new MyersState(transformedDiagonal)
+  //   result.pathCollection = st.pathCollection.map((p:Path) => p.pathByMappingPoints(mapper))
+  //   result.path = st.path.pathByMappingPoints(mapper)
+  //   result.text = st.text
+  //   result.candidates = st.candidates.map(flipLine)
+  //   result.highlights = st.highlights.map(flipLine)
+  //   result.topLevel = st.topLevel
+  //   result.diagonal = delta - st.diagonal
+  //
+  // }
 
   static EmptyState() {
     return new MyersState(0)
@@ -375,24 +415,25 @@ class MyersContext {
     const reverseContext = new MyersContext(reverseString(this.left), reverseString(this.top))
 
     for (let step = 0; step <= MAX; step++) {
-      for (let diagonal = -step; diagonal <= step; diagonal+=2) {
+      let diagonal : number
 
-        // Check for overlap either forwards or backwards
-        function checkOverlap(forwards:boolean, otherStep:number):boolean {
-          const thisContext = forwards ? forwardsContext : reverseContext
-          const otherContext = forwards ? reverseContext : forwardsContext
-          const otherDiagonal = delta - diagonal
-          let overlaps = false
-          if (otherDiagonal >= -otherStep && otherDiagonal <= otherStep) {
-            const thisEndpoint = thisContext.endpoints[diagonal].end()
-            const otherEndpoint = flipPoint(otherContext.endpoints[otherDiagonal].end())
-            assert(thisEndpoint.x - thisEndpoint.y == otherEndpoint.x - otherEndpoint.y, "Endpoints on different diagonals")
-            overlaps = thisEndpoint.x >= otherEndpoint.x
-          }
-          return overlaps
+      // Check for overlap either forwards or backwards
+      function checkOverlap(forwards:boolean, otherStep:number):boolean {
+        const thisContext = forwards ? forwardsContext : reverseContext
+        const otherContext = forwards ? reverseContext : forwardsContext
+        const otherDiagonal = delta - diagonal
+        let overlaps = false
+        if (otherDiagonal >= -otherStep && otherDiagonal <= otherStep) {
+          const thisEndpoint = thisContext.endpoints[diagonal].end()
+          const otherEndpoint = flipPoint(otherContext.endpoints[otherDiagonal].end())
+          assert(thisEndpoint.x - thisEndpoint.y == otherEndpoint.x - otherEndpoint.y, "Endpoints on different diagonals")
+          overlaps = thisEndpoint.x >= otherEndpoint.x
         }
+        return overlaps
+      }
 
-        // Forwards
+      // Forwards
+      for (diagonal = -step; diagonal <= step; diagonal+=2) {
         let forwardsOutput : MyersState[] = []
         forwardsContext.extend1Diagonal(step, diagonal, forwardsOutput)
 
@@ -406,11 +447,13 @@ class MyersContext {
         // Check for overlap
         if (deltaOdd && checkOverlap(true, step-1)) {
           return {
-            length:2*step-1,
+            editScriptLength:2*step-1,
             path:forwardsContext.endpoints[diagonal].lastSnake()
           }
         }
+      }
 
+      for (diagonal = step; diagonal >= -step; diagonal-=2) {
         // Reverse
         // Flip the diagonal
         let reversedOutput : MyersState[] = []
@@ -427,7 +470,7 @@ class MyersContext {
         // Check for overlap
         if (!deltaOdd && checkOverlap(false, step)) {
           return {
-            length:2*step,
+            editScriptLength:2*step,
             path:flipPath(reverseContext.endpoints[diagonal].lastSnake())
           }
         }
@@ -438,8 +481,9 @@ class MyersContext {
   }
 }
 
-class MyersInput {
-  constructor(public left:string, public top:string) {}
+interface MyersInput {
+  left:string
+  top:string
 }
 
 function MyersUnidir(input:MyersInput): MyersState[] {
@@ -452,4 +496,28 @@ function MyersMiddleSnake(input:MyersInput): MyersState[] {
   let output:MyersState[] = []
   ctx.middleSnake(output)
   return output
+}
+
+function MyersBidir(input:MyersInput): MyersState[] {
+  let ctx = new MyersContext(input.left, input.top)
+  let output:MyersState[] = []
+  let snake = ctx.middleSnake(output)
+  if (snake.editScriptLength > 1) {
+    // construct before and after substrings
+    let before:Point = snake.path.start()
+    assert(before.x <= input.top.length && before.y <= input.left.length, "Invalid snake")
+    let beforeInput:MyersInput = {
+      top:input.top.substring(0, before.x),
+      left:input.left.substring(0, before.y)
+    }
+    let beforeStates = MyersMiddleSnake(beforeInput)
+
+    let after:Point = snake.path.end()
+    assert(after.x <= input.top.length && after.y <= input.left.length, "Invalid snake")
+    let afterInput:MyersInput = {
+      top:input.top.substring(after.x),
+      left:input.left.substring(after.y)
+    }
+    let afterStates = MyersMiddleSnake(afterInput)
+  }
 }
