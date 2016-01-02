@@ -122,6 +122,12 @@ class TaggedString {
     assert(offset >= 0 && offset < this.length, "Offset out of bounds " + offset)
     return this.text[offset]
   }
+
+  reverse():TaggedString {
+    let result = new TaggedString(this.text.slice(0))
+    result.text.reverse()
+    return result
+  }
 }
 
 interface Snake {
@@ -357,7 +363,7 @@ class MyersContext {
       let result = new MyersState(delta - st.diagonal)
       result.pathCollection = st.pathCollection.map(flipPath)
       result.path = flipPath(st.path)
-      //result.text = ??
+      result.text = st.text.reverse()
       result.candidates = st.candidates.map(flipLine)
       result.highlights = st.highlights.map(flipLine)
       result.topLevel = st.topLevel
