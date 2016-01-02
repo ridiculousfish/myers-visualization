@@ -136,6 +136,7 @@ class MyersState {
   candidates:Line[] = []
   highlights:Line[] = []
   topLevel:boolean = true
+  reverse:boolean = false
   diagonal:number
 
   constructor(diagonal:number) {
@@ -405,6 +406,7 @@ class MyersContext {
         }
 
         // Reverse
+        // Flip the diagonal
         let reversedOutput : MyersState[] = []
         reverseContext.extend1Diagonal(step, diagonal, reversedOutput)
 
@@ -412,6 +414,7 @@ class MyersContext {
         for (let state of reversedOutput.map(flipState)) {
           append(state.pathCollection,
                  tthis.trimPaths(forwardsContext.endpoints))
+          state.reverse = true
           output.push(state)
         }
 
