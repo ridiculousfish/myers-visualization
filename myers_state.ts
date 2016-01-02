@@ -77,28 +77,22 @@ class Path {
     }
     return new Path(this.points.slice(idx+1))
   }
-
-  static Empty = new Path([])
 }
 
-function pathIndexes(paths:Path[]): number[] {
-  let result : number[] = []
-  for (var k in paths) {
-    if (paths.hasOwnProperty(k) && paths[k] !== undefined) {
-      result.push(k)
-    }
-  }
+/* Myers-style path "array" that may be indexed positive or negative */
+interface PathArray {
+  [index:number]:Path
+}
+
+function pathArrayKeys(paths:PathArray):number[] {
+  // Have to map strings to numbers
+  let result:number[] = Object.keys(paths).map(val => +val)
   result.sort(function(a, b) { return a-b; })
   return result
 }
 
-// Accounts for negative indices
-function pathValues(paths:Path[]) : Path[] {
-  let result : Path[] = []
-  for (var idx of pathIndexes(paths)) {
-    result.push(paths[idx])
-  }
-  return result
+function pathArrayValues(paths:PathArray):Path[] {
+  return pathArrayKeys(paths).map(key => paths[key])
 }
 
 class Tag {
@@ -137,7 +131,7 @@ interface Snake {
 
 class MyersState {
   pathCollection:Path[] = []
-  path:Path = Path.Empty
+  path:Path = new Path([])
   text:TaggedString = new TaggedString([])
   candidates:Line[] = []
   highlights:Line[] = []
@@ -163,7 +157,7 @@ class MyersContext {
   private left:string
   private top:string
 
-  endpoints:Path[] = []
+  endpoints:PathArray = {}
 
   constructor(left:string, top:string) {
     this.left = left
@@ -185,18 +179,14 @@ class MyersContext {
 
   // Remove any points outside of our range
   trim1Path(path:Path): Path {
-    let points = path.points.filter((p:Point)=>{
-      return p.x <= this.top.length && p.y <= this.left.length
-    })
+    let points = path.points.filter((p:Point)=>
+      p.x <= this.top.length && p.y <= this.left.length
+    )
     return new Path(points)
   }
 
-  trimPaths(paths:Path[]): Path[] {
-    let result : Path[] = []
-    for (var idx of pathIndexes(paths)) {
-      result[idx] = this.trim1Path(paths[idx])
-    }
-    return result
+  trimPaths(paths:PathArray): Path[] {
+    return pathArrayValues(paths).map((path:Path) => this.trim1Path(path))
   }
 
   taggedStringForPath(path:Path):TaggedString {
@@ -231,7 +221,7 @@ class MyersContext {
     let topLen = tthis.top.length
     let downLen = tthis.left.length
 
-    let endpoints = this.endpoints // alias to avoid typing 'this'
+    let endpoints:PathArray = this.endpoints // alias to avoid typing 'this'
     let getLine = (where:Point, down:boolean):Line => {
       // if down is true, we are starting from the diagonal above us, which is larger
       // if down is false, we are starting from the diagonal to our left, which is smaller
