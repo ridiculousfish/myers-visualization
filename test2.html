@@ -69,9 +69,9 @@
 
 <script type="text/javascript">
 var ids = new MyersIDs('#myers', '#slider', '#intermediate_diff', '#text1', '#text2')
-var input = new MyersInput('ICECREAM', 'CERAMIC')
+var input = {left:'ICECREAM', top:'CERAMIC'}
 var ui = new MyersUI(ids)
-var states = true ? MyersMiddleSnake(input) : MyersUnidir(input)
+var states = (true ? MyersBidir : (true ? MyersMiddleSnake : MyersUnidir))(input)
 ui.resetWithInput(input, states)
 console.log(ui)
 </script>

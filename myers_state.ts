@@ -158,36 +158,45 @@ class MyersState {
     this.diagonal = diagonal
   }
 
-  // Transform a state into a new state by translating and optionally flipping its points
-  // stateByTransformingPoints(translate:Point, flipAt:Point?) : MyersState {
-  //   const doFlip = (flipAt != undefined)
-  //   function mapPoint(p:Point):Point {
-  //     let result:Point = {x:p.x, y:p.y}
-  //     if (doFlip) {
-  //       result.x = flipAt.x - result.x
-  //       result.y = flipAt.y - result.y
-  //     }
-  //     result.x += translate.x
-  //     result.y += translate.y
-  //     return result
-  //   }
-  //
-  //   // determine new diagonal
-  //   let transformedDiagonal = this.diagonal
-  //   if (doFlip) {
-  //     transformedDiagonal = flipAt.x - flipAt.y - transformedDiagonal
-  //   }
-  //
-  //   let result = new MyersState(transformedDiagonal)
-  //   result.pathCollection = st.pathCollection.map((p:Path) => p.pathByMappingPoints(mapper))
-  //   result.path = st.path.pathByMappingPoints(mapper)
-  //   result.text = st.text
-  //   result.candidates = st.candidates.map(flipLine)
-  //   result.highlights = st.highlights.map(flipLine)
-  //   result.topLevel = st.topLevel
-  //   result.diagonal = delta - st.diagonal
-  //
-  // }
+  //Transform a state into a new state by translating and optionally flipping its points
+  stateByTransformingPoints(translate:Point, flipAt?:Point) : MyersState {
+    const doFlip = (flipAt != undefined)
+    function mapPoint(p:Point):Point {
+      let result:Point = {x:p.x, y:p.y}
+      if (doFlip) {
+        result.x = flipAt.x - result.x
+        result.y = flipAt.y - result.y
+      }
+      result.x += translate.x
+      result.y += translate.y
+      return result
+    }
+
+    function mapLine(line:Line):Line {
+      const start = doFlip ? line.end : line.start
+      const end = doFlip ? line.start : line.end
+      return new Line(mapPoint(start), mapPoint(end))
+    }
+
+    function mapPath(path:Path):Path {
+      return path.pathByMappingPoints(mapPoint)
+    }
+
+    // determine new diagonal
+    let transformedDiagonal = this.diagonal
+    if (doFlip) {
+      transformedDiagonal = flipAt.x - flipAt.y - transformedDiagonal
+    }
+
+    let result = new MyersState(transformedDiagonal)
+    result.pathCollection = this.pathCollection.map(mapPath)
+    result.path = mapPath(this.path)
+    result.text = doFlip ? this.text.reverse() : this.text
+    result.candidates = this.candidates.map(mapLine)
+    result.highlights = this.highlights.map(mapLine)
+    result.topLevel = this.topLevel
+    return result
+  }
 
   static EmptyState() {
     return new MyersState(0)
@@ -200,16 +209,16 @@ function append<T>(toArray:T[], fromArray:T[]) {
   }
 }
 
-class MyersContext {
-  private left:string
-  private top:string
+function identityTransform(st:MyersState):MyersState {
+  return st
+}
 
+type StateTransformer = (st:MyersState)=>MyersState
+
+class MyersContext {
   endpoints:PathArray = {}
 
-  constructor(left:string, top:string) {
-    this.left = left
-    this.top = top
-
+  constructor(public left:string, public top:string, public stateTransformer:StateTransformer = identityTransform) {
     // preload endpoints
     this.endpoints[1] = new Path([{x:0, y:-1}])
   }
@@ -326,7 +335,7 @@ class MyersContext {
     state.text = tthis.taggedStringForPath(state.path)
     state.candidates = candidateLines
     state.highlights = highlightLines
-    output.push(state)
+    output.push(tthis.stateTransformer(state))
 
     // Traverse the snake
     while (x < topLen && y < downLen && tthis.topAt(x) == tthis.leftAt(y)) {
@@ -347,7 +356,7 @@ class MyersContext {
         state.candidates = candidateLines
         state.highlights = highlightLines
         state.topLevel = false
-        output.push(state)
+        output.push(tthis.stateTransformer(state))
 
         if (x >= topLen && y >= downLen) {
             break
@@ -382,7 +391,6 @@ class MyersContext {
     const deltaOdd = delta%2 == 1
     const MAX = Math.ceil((M+N)/2)
 
-    // forwards and reverse contexts
     function reverseString(s:string):string {
       return s.split('').reverse().join('')
     }
@@ -392,27 +400,17 @@ class MyersContext {
     }
 
     function flipPath(p:Path):Path {
-      return new Path(p.points.map(flipPoint))
-    }
-
-    function flipLine(line:Line):Line {
-      return new Line(flipPoint(line.end), flipPoint(line.start))
+      return p.pathByMappingPoints(flipPoint)
     }
 
     function flipState(st:MyersState):MyersState {
-      let result = new MyersState(delta - st.diagonal)
-      result.pathCollection = st.pathCollection.map(flipPath)
-      result.path = flipPath(st.path)
-      result.text = st.text.reverse()
-      result.candidates = st.candidates.map(flipLine)
-      result.highlights = st.highlights.map(flipLine)
-      result.topLevel = st.topLevel
-      result.diagonal = delta - st.diagonal
-      return result
+      const translate = {x:0, y:0}, flipAt = {x:N, y:M}
+      return st.stateByTransformingPoints(translate, flipAt)
     }
 
+    // forwards and reverse contexts
     const forwardsContext = new MyersContext(this.left, this.top)
-    const reverseContext = new MyersContext(reverseString(this.left), reverseString(this.top))
+    const reverseContext = new MyersContext(reverseString(this.left), reverseString(this.top), flipState)
 
     for (let step = 0; step <= MAX; step++) {
       let diagonal : number
@@ -438,10 +436,10 @@ class MyersContext {
         forwardsContext.extend1Diagonal(step, diagonal, forwardsOutput)
 
         // Tell the forwards output about the reverse paths
+        const reversePaths = tthis.trimPaths(reverseContext.endpoints).map(flipPath)
         for (let state of forwardsOutput) {
-          append(state.pathCollection,
-                 tthis.trimPaths(reverseContext.endpoints).map(flipPath))
-          output.push(state)
+          append(state.pathCollection, reversePaths)
+          output.push(tthis.stateTransformer(state))
         }
 
         // Check for overlap
@@ -460,11 +458,11 @@ class MyersContext {
         reverseContext.extend1Diagonal(step, diagonal, reversedOutput)
 
         // Tell the reverse output about the forwards paths
-        for (let state of reversedOutput.map(flipState)) {
-          append(state.pathCollection,
-                 tthis.trimPaths(forwardsContext.endpoints))
+        const forwardPaths = tthis.trimPaths(forwardsContext.endpoints)
+        for (let state of reversedOutput) {
+          append(state.pathCollection, forwardPaths)
           state.reverse = true
-          output.push(state)
+          output.push(tthis.stateTransformer(state))
         }
 
         // Check for overlap
@@ -481,6 +479,45 @@ class MyersContext {
   }
 }
 
+// internal middle snake procedure
+function myersMiddleSnake(left:string, top:string, stateTransformer:StateTransformer): MyersState[] {
+  let ctx = new MyersContext(left, top, stateTransformer)
+  let output:MyersState[] = []
+  ctx.middleSnake(output)
+  return output
+}
+
+// internal myers bidir procedure
+function myersBidir(left:string, top:string, stateTransformer:StateTransformer): MyersState[] {
+  let ctx = new MyersContext(left, top, stateTransformer)
+  let output:MyersState[] = []
+  let snake = ctx.middleSnake(output)
+  if (snake.editScriptLength > 1) {
+    // construct before and after substrings
+    let before:Point = snake.path.start()
+    assert(before.x <= top.length && before.y <= left.length, "Invalid snake")
+    const beforeLeft = left.substring(0, before.y)
+    const beforeTop = top.substring(0, before.x)
+    const beforeTransform = stateTransformer
+    let beforeStates = myersMiddleSnake(beforeLeft, beforeTop, identityTransform)
+
+    let after:Point = snake.path.end()
+    assert(after.x <= top.length && after.y <= left.length, "Invalid snake")
+    const afterLeft = left.substring(after.y)
+    const afterTop = top.substring(after.x)
+    const afterTransform = (st:MyersState):MyersState => {
+      // Shift everything over by 'after' point, then apply our given transform
+      return stateTransformer(st.stateByTransformingPoints(after))
+    }
+    let afterStates = myersMiddleSnake(afterLeft, afterTop, afterTransform)
+
+    // Append everything
+    append(output, beforeStates)
+    append(output, afterStates)
+  }
+  return output
+}
+
 interface MyersInput {
   left:string
   top:string
@@ -492,32 +529,9 @@ function MyersUnidir(input:MyersInput): MyersState[] {
 }
 
 function MyersMiddleSnake(input:MyersInput): MyersState[] {
-  let ctx = new MyersContext(input.left, input.top)
-  let output:MyersState[] = []
-  ctx.middleSnake(output)
-  return output
+  return myersMiddleSnake(input.left, input.top, identityTransform)
 }
 
 function MyersBidir(input:MyersInput): MyersState[] {
-  let ctx = new MyersContext(input.left, input.top)
-  let output:MyersState[] = []
-  let snake = ctx.middleSnake(output)
-  if (snake.editScriptLength > 1) {
-    // construct before and after substrings
-    let before:Point = snake.path.start()
-    assert(before.x <= input.top.length && before.y <= input.left.length, "Invalid snake")
-    let beforeInput:MyersInput = {
-      top:input.top.substring(0, before.x),
-      left:input.left.substring(0, before.y)
-    }
-    let beforeStates = MyersMiddleSnake(beforeInput)
-
-    let after:Point = snake.path.end()
-    assert(after.x <= input.top.length && after.y <= input.left.length, "Invalid snake")
-    let afterInput:MyersInput = {
-      top:input.top.substring(after.x),
-      left:input.left.substring(after.y)
-    }
-    let afterStates = MyersMiddleSnake(afterInput)
-  }
+  return myersBidir(input.left, input.top, identityTransform)
 }
