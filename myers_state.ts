@@ -144,6 +144,13 @@ interface Snake {
   path:Path
 }
 
+interface Rectangle {
+  x:number,
+  y:number,
+  width:number,
+  height:number
+}
+
 class MyersState {
   pathCollection:Path[] = []
   path:Path = new Path([])
@@ -153,6 +160,7 @@ class MyersState {
   topLevel:boolean = true
   reverse:boolean = false
   diagonal:number
+  focusRect:Rectangle = null
 
   constructor(diagonal:number) {
     this.diagonal = diagonal
@@ -195,6 +203,14 @@ class MyersState {
     result.candidates = this.candidates.map(mapLine)
     result.highlights = this.highlights.map(mapLine)
     result.topLevel = this.topLevel
+    if (this.focusRect) {
+      result.focusRect = {
+        x:this.focusRect.x + translate.x,
+        y:this.focusRect.y + translate.y,
+        width: this.focusRect.width,
+        height: this.focusRect.height
+      }
+    }
     return result
   }
 
@@ -388,7 +404,7 @@ class MyersContext {
     const N = this.top.length
     const M = this.left.length
     const delta = N - M
-    const deltaOdd = delta%2 == 1
+    const deltaOdd = !!(delta & 1)
     const MAX = Math.ceil((M+N)/2)
 
     function reverseString(s:string):string {
@@ -489,6 +505,7 @@ function myersMiddleSnake(left:string, top:string, stateTransformer:StateTransfo
 
 // internal myers bidir procedure
 function myersBidir(left:string, top:string, stateTransformer:StateTransformer): MyersState[] {
+  console.log("bidir: <" + left + "> <" + top + ">")
   let ctx = new MyersContext(left, top, stateTransformer)
   let output:MyersState[] = []
   let snake = ctx.middleSnake(output)
@@ -498,8 +515,15 @@ function myersBidir(left:string, top:string, stateTransformer:StateTransformer):
     assert(before.x <= top.length && before.y <= left.length, "Invalid snake")
     const beforeLeft = left.substring(0, before.y)
     const beforeTop = top.substring(0, before.x)
-    const beforeTransform = stateTransformer
-    let beforeStates = myersMiddleSnake(beforeLeft, beforeTop, identityTransform)
+    const beforeTransform = (st:MyersState):MyersState => {
+      if (!st.focusRect) {
+        // +1 because we need to include the node where the snake started
+        st.focusRect = {x:0, y:0, width:before.x+1, height:before.y+1}
+      }
+      return stateTransformer(st)
+    }
+    console.log("BEFORE: " + before.y + " - " + before.x)
+    let beforeStates = myersBidir(beforeLeft, beforeTop, beforeTransform)
 
     let after:Point = snake.path.end()
     assert(after.x <= top.length && after.y <= left.length, "Invalid snake")
@@ -507,9 +531,13 @@ function myersBidir(left:string, top:string, stateTransformer:StateTransformer):
     const afterTop = top.substring(after.x)
     const afterTransform = (st:MyersState):MyersState => {
       // Shift everything over by 'after' point, then apply our given transform
-      return stateTransformer(st.stateByTransformingPoints(after))
+      let result = st.stateByTransformingPoints(after)
+      if (!st.focusRect) {
+        result.focusRect = {x:after.x, y:after.y, width:afterLeft.length, height: afterTop.length}
+      }
+      return stateTransformer(result)
     }
-    let afterStates = myersMiddleSnake(afterLeft, afterTop, afterTransform)
+    let afterStates = myersBidir(afterLeft, afterTop, afterTransform)
 
     // Append everything
     append(output, beforeStates)
