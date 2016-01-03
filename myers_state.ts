@@ -160,7 +160,7 @@ class MyersState {
   topLevel:boolean = true
   reverse:boolean = false
   diagonal:number
-  focusRect:Rectangle = null
+  focusRects:Rectangle[] = []
 
   constructor(diagonal:number) {
     this.diagonal = diagonal
@@ -203,14 +203,14 @@ class MyersState {
     result.candidates = this.candidates.map(mapLine)
     result.highlights = this.highlights.map(mapLine)
     result.topLevel = this.topLevel
-    if (this.focusRect) {
-      result.focusRect = {
-        x:this.focusRect.x + translate.x,
-        y:this.focusRect.y + translate.y,
-        width: this.focusRect.width,
-        height: this.focusRect.height
+    result.focusRects = this.focusRects.map((r:Rectangle) => {
+      return {
+        x:r.x + translate.x,
+        y:r.y + translate.y,
+        width: r.width,
+        height: r.height
       }
-    }
+    })
     return result
   }
 
@@ -516,10 +516,8 @@ function myersBidir(left:string, top:string, stateTransformer:StateTransformer):
     const beforeLeft = left.substring(0, before.y)
     const beforeTop = top.substring(0, before.x)
     const beforeTransform = (st:MyersState):MyersState => {
-      if (!st.focusRect) {
-        // +1 because we need to include the node where the snake started
-        st.focusRect = {x:0, y:0, width:before.x+1, height:before.y+1}
-      }
+      // +1 because we need to include the node where the snake started
+      st.focusRects.unshift({x:0, y:0, width:before.x+1, height:before.y+1})
       return stateTransformer(st)
     }
     console.log("BEFORE: " + before.y + " - " + before.x)
@@ -532,9 +530,7 @@ function myersBidir(left:string, top:string, stateTransformer:StateTransformer):
     const afterTransform = (st:MyersState):MyersState => {
       // Shift everything over by 'after' point, then apply our given transform
       let result = st.stateByTransformingPoints(after)
-      if (!st.focusRect) {
-        result.focusRect = {x:after.x, y:after.y, width:afterLeft.length, height: afterTop.length}
-      }
+      st.focusRects.unshift({x:after.x, y:after.y, width:afterLeft.length, height: afterTop.length})
       return stateTransformer(result)
     }
     let afterStates = myersBidir(afterLeft, afterTop, afterTransform)
